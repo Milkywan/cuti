@@ -4,14 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KAN Timesheet & Leave Simulator — PT Kalimantan Alumina Nusantara</title>
-  <!-- Tailwind CSS -->
+
+  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- SheetJS for .xlsx Excel Export -->
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+
+  <!-- SheetJS with Styling & Cell Comments Support (xlsx-js-style) + Fallback -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"
+    onerror="var s=document.createElement('script');s.src='https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js';document.head.appendChild(s);"></script>
+
   <!-- Google Fonts: Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet" />
 
   <script>
     tailwind.config = {
@@ -25,8 +29,8 @@
             kan: {
               950: '#091526',
               900: '#0F2342',
-              800: '#163563',
-              700: '#1E498A',
+              800: '#173463',
+              700: '#1E4687',
               600: '#2563EB',
               50: '#EFF6FF',
             }
@@ -55,7 +59,7 @@
       background: #94a3b8;
     }
 
-    /* Sticky left columns for mobile/tablet usability */
+    /* Sticky left columns for smooth horizontal scrolling on mobile/tablet */
     .sticky-col-1 {
       position: sticky;
       left: 0;
@@ -68,26 +72,36 @@
     }
     .sticky-col-3 {
       position: sticky;
-      left: 124px;
+      left: 126px;
       z-index: 20;
     }
 
-    /* Cell transitions */
+    /* Interactive Timesheet Cell Styling */
     .ts-cell {
+      position: relative;
       transition: transform 0.08s ease, box-shadow 0.08s ease;
       user-select: none;
     }
-    .ts-cell:hover {
-      transform: scale(1.12);
+    .ts-cell:hover,
+    .ts-cell.is-selected {
+      transform: scale(1.14);
       z-index: 30;
-      position: relative;
-      box-shadow: 0 0 0 2px #0f172a;
+      box-shadow: 0 0 0 2px #0f172a, 0 4px 10px rgba(15, 23, 42, 0.25);
     }
 
-    /* Print / PDF Styles */
+    /* Subtle pulse animation for milestone indicator dots */
+    @keyframes softPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.2); }
+    }
+    .milestone-dot {
+      animation: softPulse 2.4s infinite ease-in-out;
+    }
+
+    /* Print / A4 Landscape PDF Styles */
     @media print {
       @page {
-        size: landscape;
+        size: A4 landscape;
         margin: 8mm;
       }
       body {
@@ -111,6 +125,7 @@
         box-shadow: none !important;
         border: 1px solid #cbd5e1 !important;
         margin-bottom: 8px !important;
+        break-inside: avoid;
       }
       .matrix-scroll {
         overflow: visible !important;
@@ -129,28 +144,34 @@
       .sticky-col-3 {
         position: static !important;
       }
+      .milestone-dot {
+        display: none !important;
+      }
     }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex flex-col">
 
-  <!-- Toast Notification Banner (Non-blocking replacement for alert) -->
+  <!-- Non-blocking Toast Container -->
   <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none no-print"></div>
 
-  <!-- Interactive Floating Cell Tooltip -->
-  <div id="cellTooltip" class="fixed z-50 pointer-events-none hidden bg-slate-900 text-white text-xs rounded-xl px-3.5 py-2.5 shadow-xl border border-slate-700 max-w-xs">
-    <div id="ttDate" class="font-semibold text-amber-300 mb-0.5"></div>
-    <div id="ttCode" class="font-mono text-[11px] text-slate-300 mb-1"></div>
-    <div id="ttDesc" class="text-slate-100 leading-snug"></div>
+  <!-- Smart Floating Tooltip Card (Auto-clamped to viewport edges) -->
+  <div id="cellTooltip" class="fixed z-50 pointer-events-none hidden bg-slate-900/95 backdrop-blur-xs text-white text-xs rounded-2xl p-3.5 shadow-2xl border border-slate-700/90 max-w-sm transition-opacity duration-75">
+    <div class="flex items-center justify-between gap-2 mb-1">
+      <span id="ttDate" class="font-semibold text-amber-300 text-[11px]"></span>
+      <span id="ttBadge" class="font-mono text-[10px] font-bold px-2 py-0.5 rounded-md bg-white/10 text-slate-200 border border-white/15"></span>
+    </div>
+    <div id="ttTitle" class="font-bold text-sm text-white leading-snug mb-1.5"></div>
+    <div id="ttAdvice" class="text-slate-200 text-xs leading-relaxed bg-white/5 rounded-xl p-2.5 border border-white/10"></div>
+    <div id="ttExtra" class="mt-2 pt-1.5 border-t border-slate-700/80 text-[11px] text-emerald-300 font-medium hidden"></div>
   </div>
 
-  <!-- Top Corporate Header -->
-  <header class="bg-gradient-to-r from-kan-950 via-kan-900 to-kan-800 text-white shadow-lg border-b border-kan-700/50 no-print">
-    <div class="max-w-[1440px] mx-auto px-4 sm:px-6 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-      <!-- Brand & Title -->
+  <!-- Executive Corporate Top Header -->
+  <header class="bg-gradient-to-r from-kan-950 via-kan-900 to-indigo-950 text-white shadow-lg border-b border-indigo-800/40 no-print">
+    <div class="max-w-[1480px] mx-auto px-4 sm:px-6 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <!-- Brand Identity -->
       <div class="flex items-center gap-3.5">
-        <!-- Custom SVG Emblem: Industrial Alumina Hexagonal Crystal -->
-        <div class="w-11 h-11 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0 shadow-inner">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-400/20 to-indigo-500/20 border border-white/20 flex items-center justify-center shrink-0 shadow-inner">
           <svg class="w-6 h-6 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polygon points="12 2 21 7 21 17 12 22 3 17 3 7 12 2"></polygon>
             <line x1="12" y1="22" x2="12" y2="12"></line>
@@ -159,18 +180,18 @@
         </div>
         <div>
           <div class="flex items-center gap-2 flex-wrap">
-            <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white">KAN Timesheet & Leave Simulator</h1>
-            <span class="text-[11px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30">
-              Sistem 5:2 + TC
+            <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-white">KAN Timesheet & Leave Simulator</h1>
+            <span class="text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+              Pola 5:2 + Tabungan Cuti
             </span>
           </div>
           <p class="text-xs sm:text-sm text-slate-300 mt-0.5">
-            PT Kalimantan Alumina Nusantara — Perencanaan Jadwal Kerja Site & Simulasi Cuti Karyawan
+            PT Kalimantan Alumina Nusantara (KAN) — Sistem Perencanaan Jadwal Kerja Site & Simulasi Cuti
           </p>
         </div>
       </div>
 
-      <!-- Action Toolbar -->
+      <!-- Toolbar Buttons -->
       <div class="flex flex-wrap items-center gap-2.5">
         <button id="btnExportExcel" type="button"
           class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-sm transition cursor-pointer">
@@ -189,15 +210,15 @@
         </button>
 
         <button id="btnDeployGuide" type="button"
-          class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-400/30 text-xs sm:text-sm font-medium transition cursor-pointer">
+          class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-500/25 hover:bg-indigo-500/35 text-indigo-200 border border-indigo-400/30 text-xs sm:text-sm font-medium transition cursor-pointer">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
           </svg>
-          Cara Upload GitHub / Firebase
+          Cara Upload GitHub & Firebase
         </button>
 
-        <button id="btnReset" type="button" title="Reset ke pengaturan default"
-          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs sm:text-sm font-medium transition cursor-pointer">
+        <button id="btnReset" type="button" title="Kembalikan pengaturan awal"
+          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs sm:text-sm font-medium transition cursor-pointer">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
@@ -207,26 +228,27 @@
     </div>
   </header>
 
-  <!-- Main Content -->
-  <main class="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5 print-container">
+  <!-- Main Workspace -->
+  <main class="flex-1 max-w-[1480px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5 print-container">
 
     <!-- Print-Only Executive Document Header -->
     <div class="hidden print-only border-b-2 border-slate-900 pb-3 mb-3">
       <div class="flex justify-between items-start">
         <div>
-          <h1 class="text-base font-extrabold uppercase tracking-wide text-slate-900">PT KALIMANTAN ALUMINA NUSANTARA</h1>
-          <p class="text-xs font-semibold text-slate-700">SIMULASI TIMESHEET & RENCANA CUTI KARYAWAN (SISTEM KERJA 5:2 + TABUNGAN CUTI)</p>
+          <h1 class="text-base font-extrabold uppercase tracking-wide text-slate-900">PT KALIMANTAN ALUMINA NUSANTARA (KAN)</h1>
+          <p class="text-xs font-semibold text-slate-700">SIMULASI TIMESHEET & PERENCANAAN CUTI KARYAWAN (SISTEM 5:2 + TABUNGAN CUTI)</p>
         </div>
         <div class="text-right text-[10px] text-slate-600">
-          <div>Dokumen Simulasi HR Operations</div>
+          <div class="font-semibold">Dokumen Resmi Simulasi HR</div>
           <div id="printTimestamp"></div>
         </div>
       </div>
-      <div class="grid grid-cols-4 gap-3 mt-2.5 pt-2 border-t border-slate-300 text-[10px]">
-        <div><span class="text-slate-500">Nama:</span> <strong id="printEmpName"></strong></div>
+      <div class="grid grid-cols-3 gap-x-6 gap-y-1.5 mt-2.5 pt-2 border-t border-slate-300 text-[10px]">
+        <div><span class="text-slate-500">Nama Karyawan:</span> <strong id="printEmpName"></strong></div>
         <div><span class="text-slate-500">NIK / ID:</span> <strong id="printEmpNik"></strong></div>
         <div><span class="text-slate-500">Jabatan:</span> <strong id="printEmpRole"></strong></div>
-        <div><span class="text-slate-500">Departemen:</span> <strong id="printEmpDept"></strong></div>
+        <div><span class="text-slate-500">Departemen / Divisi:</span> <strong id="printEmpDept"></strong></div>
+        <div><span class="text-slate-500">Lokasi Kerja:</span> <strong id="printEmpLocation"></strong></div>
         <div><span class="text-slate-500">Mulai Kerja (X1):</span> <strong id="printStartDate"></strong></div>
         <div><span class="text-slate-500">Target Cuti Rumah:</span> <strong id="printLeaveDays"></strong></div>
         <div><span class="text-slate-500">Kolom Abu-Abu:</span> <strong id="printGrayStatus"></strong></div>
@@ -234,127 +256,144 @@
       </div>
     </div>
 
-    <!-- Input Controls Panel (Hidden on Print) -->
+    <!-- Input Configuration Section (Hidden on Print) -->
     <section class="bg-white rounded-2xl shadow-sm border border-slate-200/90 p-4 sm:p-5 no-print">
       <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
-        
-        <!-- Left Group: Employee / Candidate Identity -->
-        <div class="xl:col-span-5 bg-slate-50/80 rounded-xl p-4 border border-slate-200/70">
-          <div class="flex items-center gap-2 mb-3">
-            <span class="w-2 h-2 rounded-full bg-kan-700"></span>
-            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-600">1. Identitas Karyawan / Kandidat</h2>
+
+        <!-- Left Card: Employee Identity -->
+        <div class="xl:col-span-5 bg-slate-50/80 rounded-2xl p-4 border border-slate-200/80">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
+              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">1. Identitas Karyawan / Kandidat</h2>
+            </div>
+            <span class="text-[11px] font-medium text-slate-500">Otomatis masuk ke PDF & Excel</span>
           </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label for="inpName" class="block text-xs font-semibold text-slate-700 mb-1">Nama Karyawan / Kandidat</label>
+              <label for="inpName" class="block text-xs font-semibold text-slate-700 mb-1">Nama Karyawan</label>
               <input id="inpName" type="text" value="Irwan Sutrisno" placeholder="Nama lengkap..."
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-kan-600 focus:ring-2 focus:ring-kan-600/20 outline-none transition" />
+                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition" />
             </div>
             <div>
-              <label for="inpNik" class="block text-xs font-semibold text-slate-700 mb-1">NIK / ID Kandidat</label>
-              <input id="inpNik" type="text" value="KAN-2027-001" placeholder="Contoh: KAN-2027-001"
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-mono text-slate-900 focus:border-kan-600 focus:ring-2 focus:ring-kan-600/20 outline-none transition" />
+              <label for="inpNik" class="block text-xs font-semibold text-slate-700 mb-1">NIK / ID</label>
+              <input id="inpNik" type="text" value="KAN-HR-001" placeholder="Contoh: KAN-HR-001"
+                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-mono text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition" />
             </div>
             <div>
-              <label for="inpRole" class="block text-xs font-semibold text-slate-700 mb-1">Jabatan / Posisi</label>
+              <label for="inpRole" class="block text-xs font-semibold text-slate-700 mb-1">Jabatan</label>
               <input id="inpRole" type="text" value="HR Manager" placeholder="Contoh: HR Manager"
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-kan-600 focus:ring-2 focus:ring-kan-600/20 outline-none transition" />
+                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition" />
             </div>
             <div>
-              <label for="inpDept" class="block text-xs font-semibold text-slate-700 mb-1">Departemen / Lokasi</label>
-              <input id="inpDept" type="text" value="Corporate Support - Site KAN" placeholder="Departemen & Lokasi"
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-kan-600 focus:ring-2 focus:ring-kan-600/20 outline-none transition" />
+              <label for="inpDept" class="block text-xs font-semibold text-slate-700 mb-1">Departemen / Divisi</label>
+              <input id="inpDept" type="text" value="Corporate Support Division" placeholder="Departemen / Divisi"
+                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition" />
+            </div>
+            <div class="sm:col-span-2">
+              <label for="inpLocation" class="block text-xs font-semibold text-slate-700 mb-1">Lokasi Kerja</label>
+              <input id="inpLocation" type="text" value="Site - PT Kalimantan Alumina Nusantara (KAN)" placeholder="Lokasi penempatan..."
+                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition" />
             </div>
           </div>
         </div>
 
-        <!-- Right Group: Roster & Leave Simulation Parameters -->
-        <div class="xl:col-span-7 bg-kan-50/40 rounded-xl p-4 border border-kan-700/15">
-          <div class="flex items-center justify-between gap-2 mb-3">
-            <div class="flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-              <h2 class="text-xs font-bold uppercase tracking-wider text-kan-900">2. Parameter Simulasi Roster & Cuti</h2>
-            </div>
-            <span id="formulaBadge" class="text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700">
-              Syarat: 13 TC + 1 OFF = 14 Hari
-            </span>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <!-- Tanggal Mulai Kerja (X1) -->
-            <div>
-              <label for="inpStartDate" class="block text-xs font-semibold text-slate-700 mb-1">
-                Tanggal Mulai Kerja (X1)
-              </label>
-              <input id="inpStartDate" type="date" value="2027-01-04"
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 focus:border-kan-600 focus:ring-2 focus:ring-kan-600/20 outline-none transition" />
-              <p id="startDayName" class="text-[11px] text-slate-500 mt-1 font-medium">Hari: Senin</p>
+        <!-- Right Card: Simulation Parameters -->
+        <div class="xl:col-span-7 bg-indigo-50/40 rounded-2xl p-4 border border-indigo-200/70 flex flex-col justify-between">
+          <div>
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+                <h2 class="text-xs font-bold uppercase tracking-wider text-kan-900">2. Parameter Simulasi Roster & Cuti</h2>
+              </div>
+              <span id="formulaBadge" class="text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg bg-white border border-indigo-200 text-kan-900 shadow-2xs">
+                Rumus: 13 TC + 1 OFF = 14 Hari di Rumah
+              </span>
             </div>
 
-            <!-- Target Cuti di Rumah -->
-            <div>
-              <label for="inpLeaveDays" class="block text-xs font-semibold text-slate-700 mb-1">
-                Target Cuti di Rumah (Hari)
-              </label>
-              <input id="inpLeaveDays" type="number" min="2" max="60" value="14"
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:border-kan-600 focus:ring-2 focus:ring-kan-600/20 outline-none transition" />
-              <div class="flex items-center gap-1.5 mt-1.5">
-                <button type="button" data-preset-days="10" class="preset-btn px-2 py-0.5 text-[11px] font-semibold rounded-md bg-white border border-slate-300 hover:border-kan-600 hover:text-kan-700 transition cursor-pointer">10 Hari</button>
-                <button type="button" data-preset-days="14" class="preset-btn px-2 py-0.5 text-[11px] font-semibold rounded-md bg-kan-900 text-white border border-kan-900 transition cursor-pointer">14 Hari</button>
-                <button type="button" data-preset-days="21" class="preset-btn px-2 py-0.5 text-[11px] font-semibold rounded-md bg-white border border-slate-300 hover:border-kan-600 hover:text-kan-700 transition cursor-pointer">21 Hari</button>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <!-- Tanggal Mulai Kerja (X1) -->
+              <div>
+                <label for="inpStartDate" class="block text-xs font-semibold text-slate-700 mb-1">
+                  Tanggal Mulai Kerja (X1)
+                </label>
+                <input id="inpStartDate" type="date" value="2027-01-04"
+                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition" />
+                <p id="startDayName" class="text-[11px] text-indigo-700 mt-1 font-semibold">Hari Mulai: Senin</p>
+              </div>
+
+              <!-- Target Hari Cuti di Rumah -->
+              <div>
+                <label for="inpLeaveDays" class="block text-xs font-semibold text-slate-700 mb-1">
+                  Target Cuti di Rumah (Hari)
+                </label>
+                <input id="inpLeaveDays" type="number" min="2" max="60" value="14"
+                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-extrabold text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition" />
+                <p id="tcNeededHint" class="text-[11px] text-slate-500 mt-1 font-medium">Butuh 13 TC (13 minggu)</p>
+              </div>
+
+              <!-- Saklar Kolom Abu-Abu Pasca-Cuti -->
+              <div>
+                <label for="selGrayColumn" class="block text-xs font-semibold text-slate-700 mb-1">
+                  Kolom Abu-Abu Pasca-Cuti
+                </label>
+                <select id="selGrayColumn"
+                  class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition">
+                  <option value="inactive" selected>Tidak Aktif (Kotak Abu-Abu / Peluang Traveling Day)</option>
+                  <option value="active">Aktif (Langsung Wajib Masuk X1)</option>
+                </select>
+                <p id="grayHint" class="text-[11px] text-slate-500 mt-1 leading-tight">1 hari transisi pasca C13</p>
+              </div>
+
+              <!-- Mode Tampilan Kalender -->
+              <div>
+                <label for="selViewMode" class="block text-xs font-semibold text-slate-700 mb-1">
+                  Mode Tampilan Kalender
+                </label>
+                <select id="selViewMode"
+                  class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 outline-none transition">
+                  <option value="full_year" selected>1 Tahun Kalender Penuh (Jan – Des)</option>
+                  <option value="rolling_12">12 Bulan Berjalan (Mulai Bulan X1)</option>
+                </select>
+                <p id="viewHint" class="text-[11px] text-slate-500 mt-1 leading-tight">Januari – Desember 2027</p>
               </div>
             </div>
+          </div>
 
-            <!-- Status Kolom Abu-Abu -->
-            <div>
-              <label for="selGrayColumn" class="block text-xs font-semibold text-slate-700 mb-1">
-                Kolom Abu-Abu (Pasca-Cuti)
-              </label>
-              <select id="selGrayColumn"
-                class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-xs sm:text-sm font-medium text-slate-900 focus:border-kan-600 focus:ring-2 focus:ring-kan-600/20 outline-none transition">
-                <option value="inactive" selected>Tidak Aktif (Kosong Abu-Abu / Peluang Travel)</option>
-                <option value="active">Aktif (Langsung Wajib Masuk X1)</option>
-              </select>
-              <p id="grayHint" class="text-[11px] text-slate-500 mt-1 leading-tight">1 hari kosong abu-abu setelah C terakhir</p>
-            </div>
-
-            <!-- Mode Tampilan Kalender -->
-            <div>
-              <label for="selViewMode" class="block text-xs font-semibold text-slate-700 mb-1">
-                Mode Tampilan Kalender
-              </label>
-              <select id="selViewMode"
-                class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-xs sm:text-sm font-medium text-slate-900 focus:border-kan-600 focus:ring-2 focus:ring-kan-600/20 outline-none transition">
-                <option value="full_year" selected>1 Tahun Kalender Penuh (Jan – Des)</option>
-                <option value="rolling_12">12 Bulan Berjalan (Mulai Bulan X1)</option>
-              </select>
-              <p id="viewHint" class="text-[11px] text-slate-500 mt-1 leading-tight">Menampilkan Jan – Des tahun X1</p>
+          <!-- Quick Preset Buttons Row -->
+          <div class="mt-3.5 pt-3 border-t border-indigo-200/60 flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-slate-600">Preset Cepat Target Cuti:</span>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button type="button" data-preset-days="7"
+                class="preset-btn px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-white border border-slate-300 text-slate-700 hover:border-indigo-600 hover:text-indigo-700 transition cursor-pointer">
+                7 Hari (6 TC)
+              </button>
+              <button type="button" data-preset-days="10"
+                class="preset-btn px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-white border border-slate-300 text-slate-700 hover:border-indigo-600 hover:text-indigo-700 transition cursor-pointer">
+                10 Hari (9 TC)
+              </button>
+              <button type="button" data-preset-days="14"
+                class="preset-btn px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-kan-900 text-white border border-kan-900 shadow-2xs transition cursor-pointer">
+                14 Hari (13 TC)
+              </button>
+              <button type="button" data-preset-days="21"
+                class="preset-btn px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-white border border-slate-300 text-slate-700 hover:border-indigo-600 hover:text-indigo-700 transition cursor-pointer">
+                21 Hari (20 TC)
+              </button>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- KPI Summary Cards -->
+    <!-- 6 KPI Summary Dashboard Cards -->
     <section class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 print-card">
-      <!-- Card 1: Frekuensi Cuti -->
+      <!-- KPI 1: Total Hari Kerja Fisik (X) -->
       <div class="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-sm">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Frekuensi Pulang</span>
-          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-        </div>
-        <div class="mt-1.5 flex items-baseline gap-1.5">
-          <span id="kpiLeaveCount" class="text-2xl font-extrabold text-emerald-700 font-mono">3x</span>
-          <span class="text-xs text-slate-500 font-medium">/ periode</span>
-        </div>
-        <p id="kpiLeaveSub" class="text-[11px] text-slate-500 mt-1">Siklus on-site: 91 hari</p>
-      </div>
-
-      <!-- Card 2: Total Hari Kerja Fisik (X) -->
-      <div class="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-sm">
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Hari Kerja (X)</span>
-          <span class="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Hari Kerja (X)</span>
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
         </div>
         <div class="mt-1.5 flex items-baseline gap-1.5">
           <span id="kpiWorkDays" class="text-2xl font-extrabold text-slate-900 font-mono">0</span>
@@ -363,10 +402,10 @@
         <p class="text-[11px] text-slate-500 mt-1">Pola 5 hari kerja / minggu</p>
       </div>
 
-      <!-- Card 3: Total Tabungan Cuti (TC) -->
+      <!-- KPI 2: Total Tabungan Cuti (TC) -->
       <div class="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-sm">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Tabungan Cuti (TC)</span>
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Tabungan Cuti (TC)</span>
           <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
         </div>
         <div class="mt-1.5 flex items-baseline gap-1.5">
@@ -376,147 +415,201 @@
         <p id="kpiTcSub" class="text-[11px] text-slate-500 mt-1">Hari ke-6 kerja (1:1 TC)</p>
       </div>
 
-      <!-- Card 4: Libur Mingguan Site (OFF) -->
+      <!-- KPI 3: Total Hari OFF Mingguan -->
       <div class="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-sm">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">OFF Mingguan Site</span>
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Hari OFF Mingguan</span>
           <span class="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
         </div>
         <div class="mt-1.5 flex items-baseline gap-1.5">
-          <span id="kpiSiteOffDays" class="text-2xl font-extrabold text-sky-700 font-mono">0</span>
+          <span id="kpiTotalOffDays" class="text-2xl font-extrabold text-sky-700 font-mono">0</span>
           <span class="text-xs text-slate-500 font-medium">hari</span>
         </div>
-        <p class="text-[11px] text-slate-500 mt-1">Istirahat mingguan di site</p>
+        <p id="kpiOffSub" class="text-[11px] text-slate-500 mt-1">Site + OFF awal pulang</p>
       </div>
 
-      <!-- Card 5: Total Hari Cuti di Rumah -->
+      <!-- KPI 4: Frekuensi Pulang / Cuti -->
       <div class="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-sm">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total di Rumah</span>
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Frekuensi Pulang</span>
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+        </div>
+        <div class="mt-1.5 flex items-baseline gap-1.5">
+          <span id="kpiLeaveCount" class="text-2xl font-extrabold text-emerald-700 font-mono">3x</span>
+          <span class="text-xs text-slate-500 font-medium">/ periode</span>
+        </div>
+        <p id="kpiLeaveSub" class="text-[11px] text-slate-500 mt-1">Siklus on-site: 91 hari</p>
+      </div>
+
+      <!-- KPI 5: Total Hari di Rumah (OFF + C) -->
+      <div class="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total di Rumah</span>
           <span class="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
         </div>
         <div class="mt-1.5 flex items-baseline gap-1.5">
           <span id="kpiHomeDays" class="text-2xl font-extrabold text-emerald-700 font-mono">0</span>
           <span class="text-xs text-slate-500 font-medium">hari</span>
         </div>
-        <p id="kpiHomeSub" class="text-[11px] text-slate-500 mt-1">Gabungan OFF awal + C1..Cn</p>
+        <p id="kpiHomeSub" class="text-[11px] text-slate-500 mt-1">OFF awal pulang + C1..Cn</p>
       </div>
 
-      <!-- Card 6: Kolom Abu-Abu / Transisi -->
+      <!-- KPI 6: Status Kotak Abu-Abu / Traveling Day -->
       <div class="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-sm">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Transisi Abu-Abu</span>
-          <span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Kotak Abu-Abu</span>
+          <span class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
         </div>
         <div class="mt-1.5 flex items-baseline gap-1.5">
           <span id="kpiGrayDays" class="text-2xl font-extrabold text-slate-700 font-mono">0</span>
           <span class="text-xs text-slate-500 font-medium">hari</span>
         </div>
-        <p id="kpiGraySub" class="text-[11px] text-slate-500 mt-1">Peluang traveling pasca-cuti</p>
+        <p id="kpiGraySub" class="text-[11px] text-slate-500 mt-1">Peluang Traveling Day</p>
       </div>
     </section>
 
-    <!-- Timesheet Matrix Card -->
+    <!-- Timesheet Matrix & Smart Guidance Inspector Card -->
     <section class="bg-white rounded-2xl shadow-sm border border-slate-200/90 overflow-hidden print-card">
       <!-- Matrix Header & Color Legend -->
-      <div class="px-4 sm:px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+      <div class="px-4 sm:px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
         <div>
-          <h2 class="text-sm sm:text-base font-bold text-slate-900">Matriks Timesheet & Simulasi Cuti (12 Bulan)</h2>
-          <p id="matrixSubtitle" class="text-xs text-slate-500 mt-0.5">Arahkan kursor atau ketuk kotak tanggal untuk melihat rincian hari dan status siklus.</p>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h2 class="text-sm sm:text-base font-bold text-slate-900">Matriks Timesheet & Simulasi Cuti (12 Bulan)</h2>
+            <span id="activeEmpChip" class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+              Irwan Sutrisno • HR Manager
+            </span>
+          </div>
+          <p class="text-xs text-slate-500 mt-0.5">
+            Sorot atau ketuk sel tanggal mana saja (terutama sel bertanda titik aksen seperti <strong>TC Terakhir</strong> & <strong>Kotak Abu-Abu</strong>) untuk melihat saran HR.
+          </p>
         </div>
 
         <!-- Color Legend -->
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] font-medium">
           <span class="inline-flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded border border-indigo-300 bg-sky-50 inline-flex items-center justify-center font-mono text-[9px] font-extrabold text-indigo-900">X1</span>
+            <span class="text-slate-700">Awal Siklus</span>
+          </span>
+          <span class="inline-flex items-center gap-1.5">
             <span class="w-4 h-4 rounded border border-slate-300 bg-white inline-block"></span>
             <span class="text-slate-700">X (Kerja Site)</span>
           </span>
           <span class="inline-flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded border border-amber-300 bg-amber-200 inline-block"></span>
+            <span class="w-4 h-4 rounded border border-amber-400 bg-amber-100 inline-block relative">
+              <span class="w-1.5 h-1.5 rounded-full bg-rose-500 absolute -top-0.5 -right-0.5"></span>
+            </span>
             <span class="text-slate-700">TC (Tabungan Cuti)</span>
           </span>
           <span class="inline-flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded border border-sky-300 bg-sky-200 inline-block"></span>
-            <span class="text-slate-700">OFF (Libur Site)</span>
+            <span class="w-4 h-4 rounded border border-sky-300 bg-sky-100 inline-block"></span>
+            <span class="text-slate-700">OFF (Site)</span>
           </span>
           <span class="inline-flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded border border-emerald-500 bg-emerald-300 inline-block"></span>
-            <span class="text-slate-700">OFF (Awal Pulang)</span>
+            <span class="w-4 h-4 rounded border border-emerald-400 bg-emerald-100 inline-block"></span>
+            <span class="text-slate-700">OFF + C1..Cn (Rumah)</span>
           </span>
           <span class="inline-flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded border border-emerald-400 bg-emerald-200 inline-block"></span>
-            <span class="text-slate-700">C1..Cn (Cuti Rumah)</span>
+            <span class="w-4 h-4 rounded border border-slate-700 bg-slate-600 text-white inline-flex items-center justify-center text-[9px]">✈</span>
+            <span class="text-slate-700">Abu-Abu (Travel)</span>
           </span>
           <span class="inline-flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded border border-slate-600 bg-slate-500 inline-block"></span>
-            <span class="text-slate-700">Abu-Abu (Transisi)</span>
-          </span>
-          <span class="inline-flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded border border-slate-800 bg-slate-700 inline-block"></span>
-            <span class="text-slate-700">Pre-X1</span>
-          </span>
-          <span class="inline-flex items-center gap-1.5">
-            <span class="w-4 h-4 rounded border border-slate-950 bg-slate-900 inline-block"></span>
-            <span class="text-slate-700">Tgl Tidak Ada</span>
+            <span class="w-4 h-4 rounded border border-slate-300 bg-slate-300 inline-block"></span>
+            <span class="text-slate-700">Pra-X1 / Non-Kalender</span>
           </span>
         </div>
       </div>
 
+      <!-- Pinned Live Guidance Inspector Bar (Always Visible & Interactive on Hover/Tap) -->
+      <div id="inspectorBar" class="px-4 sm:px-5 py-3 bg-gradient-to-r from-amber-50/90 via-white to-indigo-50/70 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 no-print">
+        <div class="flex items-start gap-3">
+          <div id="inspIconBox" class="w-9 h-9 rounded-xl bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0 text-base shadow-2xs mt-0.5">
+            🎯
+          </div>
+          <div class="space-y-0.5">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span id="inspDateBadge" class="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-900 text-amber-300 font-mono">
+                Sorot Sel Tabel
+              </span>
+              <h3 id="inspTitle" class="text-xs sm:text-sm font-extrabold text-slate-900">
+                Target Tabungan Cuti Tercapai! (TC13 — Hari Keberangkatan)
+              </h3>
+            </div>
+            <p id="inspAdvice" class="text-xs text-slate-700 leading-relaxed">
+              Manfaatkan hari ini sebagai Traveling Day keberangkatanmu! Setelah jam kerja selesai, kamu sudah bisa memulai perjalanan pulang ke POH agar waktu istirahat di rumah maksimal.
+            </p>
+            <p id="inspExtra" class="text-[11px] font-semibold text-emerald-700"></p>
+          </div>
+        </div>
+
+        <!-- Quick Milestone Jump Buttons -->
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <button id="btnJumpFinalTc" type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 text-xs font-bold transition cursor-pointer">
+            🎯 Cek TC Terakhir #1
+          </button>
+          <button id="btnJumpGrayCell" type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white border border-slate-800 text-xs font-semibold transition cursor-pointer">
+            🛫 Cek Kotak Abu-Abu #1
+          </button>
+        </div>
+      </div>
+
       <!-- Horizontal Scrollable Matrix Table -->
-      <div class="matrix-scroll overflow-x-auto">
+      <div id="matrixScrollWrapper" class="matrix-scroll overflow-x-auto">
         <table class="ts-table w-full border-collapse text-center text-[11px]">
           <thead>
             <tr class="bg-kan-900 text-white font-semibold">
               <th class="sticky-col-1 bg-kan-900 border border-kan-800 px-2 py-2.5 w-9 min-w-[36px]">No</th>
-              <th class="sticky-col-2 bg-kan-900 border border-kan-800 px-2.5 py-2.5 w-24 min-w-[88px] text-left">Bulan</th>
-              <th class="sticky-col-3 bg-kan-900 border border-kan-800 px-2 py-2.5 w-16 min-w-[64px]">Roster</th>
-              <!-- Day headers 1..31 generated by JS -->
-              <th class="border border-kan-800 py-2 min-w-[34px]">1</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">2</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">3</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">4</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">5</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">6</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">7</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">8</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">9</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">10</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">11</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">12</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">13</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">14</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">15</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">16</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">17</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">18</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">19</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">20</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">21</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">22</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">23</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">24</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">25</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">26</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">27</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">28</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">29</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">30</th>
-              <th class="border border-kan-800 py-2 min-w-[34px]">31</th>
+              <th class="sticky-col-2 bg-kan-900 border border-kan-800 px-2.5 py-2.5 w-24 min-w-[90px] text-left">Bulan</th>
+              <th class="sticky-col-3 bg-kan-900 border border-kan-800 px-2 py-2.5 w-16 min-w-[66px]">Roster</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">1</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">2</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">3</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">4</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">5</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">6</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">7</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">8</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">9</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">10</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">11</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">12</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">13</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">14</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">15</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">16</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">17</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">18</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">19</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">20</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">21</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">22</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">23</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">24</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">25</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">26</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">27</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">28</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">29</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">30</th>
+              <th class="border border-kan-800 py-2 min-w-[35px]">31</th>
             </tr>
           </thead>
           <tbody id="matrixBody" class="divide-y divide-slate-200 font-mono">
-            <!-- Rows injected dynamically by JS -->
+            <!-- Dynamically populated by JavaScript -->
           </tbody>
         </table>
       </div>
     </section>
 
-    <!-- Leave Periods Breakdown Section -->
+    <!-- Structured Cycle Breakdown Table -->
     <section class="bg-white rounded-2xl shadow-sm border border-slate-200/90 overflow-hidden print-card">
       <div class="px-4 sm:px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
-          <h2 class="text-sm sm:text-base font-bold text-slate-900">Rincian Jadwal Periode Cuti di Rumah</h2>
-          <p class="text-xs text-slate-500 mt-0.5">Estimasi tanggal keberangkatan (OFF awal pulang), masa cuti (C1–Cn), dan tanggal kembali aktif bekerja (X1).</p>
+          <h2 class="text-sm sm:text-base font-bold text-slate-900">Rincian Jadwal & Panduan Perjalanan per Siklus Cuti</h2>
+          <p class="text-xs text-slate-500 mt-0.5">
+            Panduan lengkap hari keberangkatan (TC terakhir), hari pertama di rumah (OFF), blok cuti (C1–C akhir), serta jadwal kembali ke site.
+          </p>
         </div>
         <span id="homePassageBadge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
           Kuota Home Passage OL: 3x / Tahun
@@ -526,31 +619,31 @@
       <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse text-xs sm:text-sm">
           <thead>
-            <tr class="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
-              <th class="px-4 py-2.5">Periode</th>
-              <th class="px-4 py-2.5">Hari ke-1 di Rumah (OFF)</th>
-              <th class="px-4 py-2.5">Rentang Cuti (C1 – Cn)</th>
-              <th class="px-4 py-2.5">Total di Rumah</th>
-              <th class="px-4 py-2.5">Hari Transisi (Abu-Abu)</th>
-              <th class="px-4 py-2.5">Wajib Masuk Kembali (X1)</th>
+            <tr class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+              <th class="px-4 py-2.5">Siklus</th>
+              <th class="px-4 py-2.5">Tanggal TC Terakhir (Saran Berangkat)</th>
+              <th class="px-4 py-2.5">Tanggal Mulai di Rumah (OFF)</th>
+              <th class="px-4 py-2.5">Periode Cuti (C1–C akhir)</th>
+              <th class="px-4 py-2.5">Status Hari Kembali (Kotak Abu-Abu / X1)</th>
+              <th class="px-4 py-2.5">Total Hari di Rumah</th>
             </tr>
           </thead>
           <tbody id="leaveBreakdownBody" class="divide-y divide-slate-200">
-            <!-- Populated dynamically -->
+            <!-- Dynamically populated -->
           </tbody>
         </table>
       </div>
     </section>
 
-    <!-- Print-Only Signature Footer -->
-    <div class="hidden print-only pt-4 mt-4 border-t border-slate-300">
-      <div class="grid grid-cols-2 gap-12 text-xs text-slate-800 max-w-2xl">
+    <!-- Print-Only Signature Blocks -->
+    <div class="hidden print-only pt-5 mt-4 border-t border-slate-300">
+      <div class="grid grid-cols-2 gap-16 text-xs text-slate-800 max-w-3xl">
         <div>
-          <p class="text-slate-500 mb-10">Disimulasikan oleh (HR Department):</p>
+          <p class="text-slate-500 mb-12">Disusun & Disimulasikan oleh (HR Department):</p>
           <p class="font-bold underline">HR Manager — PT Kalimantan Alumina Nusantara</p>
         </div>
         <div>
-          <p class="text-slate-500 mb-10">Diterima & Dipahami oleh (Karyawan / Kandidat):</p>
+          <p class="text-slate-500 mb-12">Diterima & Dipahami oleh (Karyawan / Kandidat):</p>
           <p id="printSignEmp" class="font-bold underline">Irwan Sutrisno</p>
         </div>
       </div>
@@ -558,27 +651,27 @@
 
   </main>
 
-  <!-- Footer -->
+  <!-- Corporate Footer -->
   <footer class="bg-white border-t border-slate-200 py-4 px-4 sm:px-6 text-xs text-slate-500 no-print">
-    <div class="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+    <div class="max-w-[1480px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
       <div>
-        <strong class="text-slate-700">PT Kalimantan Alumina Nusantara (KAN)</strong> — HR Operations & Workforce Planning Tool
+        <strong class="text-slate-700">PT Kalimantan Alumina Nusantara (KAN)</strong> — HR Operations & Workforce Planning Simulator
       </div>
       <div>
-        Single-File Web App • Siap di-deploy ke GitHub Pages & Firebase Hosting
+        Single-File Web Application • Mendukung Export Excel dengan Komentar Sel & Hosting GitHub / Firebase
       </div>
     </div>
   </footer>
 
-  <!-- Modal: Cara Upload ke GitHub Pages & Firebase Hosting -->
+  <!-- Modal: Panduan Upload GitHub Pages & Firebase Hosting -->
   <div id="deployModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 no-print">
-    <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden animate-fadeIn">
+    <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden">
       <div class="px-5 py-4 bg-kan-900 text-white flex items-center justify-between">
         <div class="flex items-center gap-2.5">
           <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
           </svg>
-          <h3 class="font-bold text-base">Panduan Upload Gratis ke GitHub Pages & Firebase</h3>
+          <h3 class="font-bold text-base">Panduan Upload Gratis ke GitHub Pages & Firebase Hosting</h3>
         </div>
         <button id="btnCloseModal" type="button" class="text-slate-300 hover:text-white p-1 rounded-lg cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -589,14 +682,14 @@
 
       <div class="p-5 space-y-4 text-sm text-slate-700 max-h-[80vh] overflow-y-auto">
         <p class="text-xs sm:text-sm text-slate-600">
-          Aplikasi ini dibangun dalam <strong>1 file mandiri (<code class="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-kan-800">index.html</code>)</strong> tanpa membutuhkan server backend. Lo bisa langsung meng-online-kannya gratis dalam 3 menit:
+          Aplikasi ini dibangun dalam <strong>1 file mandiri (<code class="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-indigo-800">index.html</code>)</strong> tanpa membutuhkan server backend. Ikuti langkah berikut untuk meng-online-kannya:
         </p>
 
         <!-- Step 1 -->
         <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-          <h4 class="font-bold text-slate-900 mb-1">Langkah 1: Simpan Kode Sebagai <code class="font-mono text-kan-700">index.html</code></h4>
+          <h4 class="font-bold text-slate-900 mb-1">Langkah 1: Simpan File Sebagai <code class="font-mono text-indigo-700">index.html</code></h4>
           <p class="text-xs text-slate-600">
-            Download atau copy seluruh kode HTML aplikasi ini, simpan ke dalam folder baru di laptop lo (misal folder <code class="bg-white px-1.5 py-0.5 rounded border font-mono">kan-timesheet</code>) dengan nama file wajib: <code class="bg-white px-1.5 py-0.5 rounded border font-mono font-bold">index.html</code>.
+            Simpan seluruh kode aplikasi ini ke dalam folder baru di komputer (misal folder <code class="bg-white px-1.5 py-0.5 rounded border font-mono">kan-timesheet</code>) dengan nama file wajib: <code class="bg-white px-1.5 py-0.5 rounded border font-mono font-bold">index.html</code>.
           </p>
         </div>
 
@@ -604,23 +697,23 @@
         <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
           <h4 class="font-bold text-slate-900 mb-1">Langkah 2: Ujicoba Cepat via GitHub Pages (Tanpa Terminal)</h4>
           <ol class="list-decimal list-inside text-xs text-slate-600 space-y-1">
-            <li>Buka <strong>github.com</strong> → klik <strong>New Repository</strong> (beri nama misal <code class="font-mono">kan-timesheet</code>, pilih Public).</li>
-            <li>Klik <strong>uploading an existing file</strong> → tarik file <code class="font-mono">index.html</code> → klik <strong>Commit changes</strong>.</li>
-            <li>Masuk ke menu <strong>Settings → Pages</strong> → pada bagian <em>Branch</em> pilih <code class="font-mono">main</code> lalu klik <strong>Save</strong>. Link web langsung aktif dalam ±1 menit!</li>
+            <li>Buka <strong>github.com</strong> → klik <strong>New Repository</strong> (beri nama <code class="font-mono">kan-timesheet</code>, pilih Public).</li>
+            <li>Klik <strong>uploading an existing file</strong> → seret file <code class="font-mono">index.html</code> → klik <strong>Commit changes</strong>.</li>
+            <li>Masuk ke tab <strong>Settings → Pages</strong> → di bagian <em>Branch</em> pilih <code class="font-mono">main</code> lalu klik <strong>Save</strong>. Link publik langsung aktif dalam ±1 menit!</li>
           </ol>
         </div>
 
         <!-- Step 3: Firebase Hosting -->
         <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
           <div class="flex items-center justify-between mb-1">
-            <h4 class="font-bold text-slate-900">Langkah 3: Deploy ke Firebase Hosting (Opsional / Produksi)</h4>
+            <h4 class="font-bold text-slate-900">Langkah 3: Deploy ke Firebase Hosting (Produksi)</h4>
             <button id="btnCopyFirebaseCmd" type="button"
               class="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-kan-900 hover:bg-kan-800 text-white transition cursor-pointer">
               Copy Perintah CLI
             </button>
           </div>
           <p class="text-xs text-slate-600 mb-2">
-            Buat project di <strong>console.firebase.google.com</strong>, lalu jalankan perintah berikut di terminal dalam folder project lo (pilih folder publik <code class="font-mono">.</code> saat ditanya):
+            Buat project di <strong>console.firebase.google.com</strong>, lalu jalankan perintah berikut di terminal dalam folder project (pilih folder publik <code class="font-mono">.</code> saat ditanya):
           </p>
           <pre id="firebaseCmdText" class="bg-slate-900 text-emerald-300 font-mono text-xs p-3 rounded-lg overflow-x-auto">npm install -g firebase-tools
 firebase login
@@ -638,12 +731,11 @@ firebase deploy</pre>
     </div>
   </div>
 
-  <!-- Application Logic -->
+  <!-- Core Simulation & Interactive UI Script -->
   <script>
     (function () {
       'use strict';
 
-      // Indonesian Day & Month Names
       const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
       const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
       const MONTH_FULL = [
@@ -651,34 +743,55 @@ firebase deploy</pre>
         'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
       ];
 
-      // DOM Elements
+      // Cache DOM elements
       const els = {
         inpName: document.getElementById('inpName'),
         inpNik: document.getElementById('inpNik'),
         inpRole: document.getElementById('inpRole'),
         inpDept: document.getElementById('inpDept'),
+        inpLocation: document.getElementById('inpLocation'),
         inpStartDate: document.getElementById('inpStartDate'),
         inpLeaveDays: document.getElementById('inpLeaveDays'),
         selGrayColumn: document.getElementById('selGrayColumn'),
         selViewMode: document.getElementById('selViewMode'),
 
         startDayName: document.getElementById('startDayName'),
+        tcNeededHint: document.getElementById('tcNeededHint'),
         formulaBadge: document.getElementById('formulaBadge'),
         grayHint: document.getElementById('grayHint'),
         viewHint: document.getElementById('viewHint'),
-        matrixSubtitle: document.getElementById('matrixSubtitle'),
+        activeEmpChip: document.getElementById('activeEmpChip'),
 
-        kpiLeaveCount: document.getElementById('kpiLeaveCount'),
-        kpiLeaveSub: document.getElementById('kpiLeaveSub'),
         kpiWorkDays: document.getElementById('kpiWorkDays'),
         kpiTcDays: document.getElementById('kpiTcDays'),
         kpiTcSub: document.getElementById('kpiTcSub'),
-        kpiSiteOffDays: document.getElementById('kpiSiteOffDays'),
+        kpiTotalOffDays: document.getElementById('kpiTotalOffDays'),
+        kpiOffSub: document.getElementById('kpiOffSub'),
+        kpiLeaveCount: document.getElementById('kpiLeaveCount'),
+        kpiLeaveSub: document.getElementById('kpiLeaveSub'),
         kpiHomeDays: document.getElementById('kpiHomeDays'),
         kpiHomeSub: document.getElementById('kpiHomeSub'),
         kpiGrayDays: document.getElementById('kpiGrayDays'),
         kpiGraySub: document.getElementById('kpiGraySub'),
 
+        // Pinned Guidance Inspector
+        inspIconBox: document.getElementById('inspIconBox'),
+        inspDateBadge: document.getElementById('inspDateBadge'),
+        inspTitle: document.getElementById('inspTitle'),
+        inspAdvice: document.getElementById('inspAdvice'),
+        inspExtra: document.getElementById('inspExtra'),
+        btnJumpFinalTc: document.getElementById('btnJumpFinalTc'),
+        btnJumpGrayCell: document.getElementById('btnJumpGrayCell'),
+
+        // Floating Tooltip
+        cellTooltip: document.getElementById('cellTooltip'),
+        ttDate: document.getElementById('ttDate'),
+        ttBadge: document.getElementById('ttBadge'),
+        ttTitle: document.getElementById('ttTitle'),
+        ttAdvice: document.getElementById('ttAdvice'),
+        ttExtra: document.getElementById('ttExtra'),
+
+        matrixScrollWrapper: document.getElementById('matrixScrollWrapper'),
         matrixBody: document.getElementById('matrixBody'),
         leaveBreakdownBody: document.getElementById('leaveBreakdownBody'),
         homePassageBadge: document.getElementById('homePassageBadge'),
@@ -694,18 +807,15 @@ firebase deploy</pre>
         btnCopyFirebaseCmd: document.getElementById('btnCopyFirebaseCmd'),
         firebaseCmdText: document.getElementById('firebaseCmdText'),
 
-        cellTooltip: document.getElementById('cellTooltip'),
-        ttDate: document.getElementById('ttDate'),
-        ttCode: document.getElementById('ttCode'),
-        ttDesc: document.getElementById('ttDesc'),
         toastContainer: document.getElementById('toastContainer'),
 
-        // Print elements
+        // Print metadata fields
         printTimestamp: document.getElementById('printTimestamp'),
         printEmpName: document.getElementById('printEmpName'),
         printEmpNik: document.getElementById('printEmpNik'),
         printEmpRole: document.getElementById('printEmpRole'),
         printEmpDept: document.getElementById('printEmpDept'),
+        printEmpLocation: document.getElementById('printEmpLocation'),
         printStartDate: document.getElementById('printStartDate'),
         printLeaveDays: document.getElementById('printLeaveDays'),
         printGrayStatus: document.getElementById('printGrayStatus'),
@@ -713,10 +823,10 @@ firebase deploy</pre>
         printSignEmp: document.getElementById('printSignEmp')
       };
 
-      // Global simulation state for export
       let latestSimulation = null;
+      let selectedCellElement = null;
 
-      // Utility: Parse YYYY-MM-DD safely in local time (avoid timezone off-by-one)
+      // Date Helpers (Local timezone safe)
       function parseLocalDate(isoStr) {
         if (!isoStr || !/^\d{4}-\d{2}-\d{2}$/.test(isoStr)) {
           return new Date(2027, 0, 4);
@@ -725,7 +835,6 @@ firebase deploy</pre>
         return new Date(y, m - 1, d, 0, 0, 0, 0);
       }
 
-      // Utility: Date key YYYY-MM-DD
       function toDateKey(dateObj) {
         const y = dateObj.getFullYear();
         const m = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -733,7 +842,6 @@ firebase deploy</pre>
         return `${y}-${m}-${d}`;
       }
 
-      // Utility: Format Indonesian Date e.g. "Senin, 4 Jan 2027"
       function formatIndoDate(dateObj, shortMonth = true) {
         if (!dateObj) return '-';
         const dayName = DAY_NAMES[dateObj.getDay()];
@@ -743,19 +851,17 @@ firebase deploy</pre>
         return `${dayName}, ${dayNum} ${monthName} ${year}`;
       }
 
-      // Utility: Add days cleanly
       function addDays(dateObj, days) {
         const copy = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
         copy.setDate(copy.getDate() + days);
         return copy;
       }
 
-      // Utility: Days in month
       function getDaysInMonth(year, monthIndex) {
         return new Date(year, monthIndex + 1, 0).getDate();
       }
 
-      // Non-blocking toast notification
+      // Non-blocking Toast Banner
       function showToast(message, type = 'success') {
         const toast = document.createElement('div');
         const bgClass = type === 'error'
@@ -772,7 +878,7 @@ firebase deploy</pre>
         }, 3200);
       }
 
-      // Core Simulation Engine
+      // Main Simulation Engine
       function runSimulation() {
         try {
           const startDate = parseLocalDate(els.inpStartDate.value);
@@ -780,31 +886,45 @@ firebase deploy</pre>
           if (isNaN(targetLeaveDays) || targetLeaveDays < 2) targetLeaveDays = 2;
           if (targetLeaveDays > 60) targetLeaveDays = 60;
 
-          const grayActive = els.selGrayColumn.value === 'active'; // true = directly X1, false = inactive gray transition day
-          const viewMode = els.selViewMode.value; // 'full_year' | 'rolling_12'
-
-          // Update helper texts
-          els.startDayName.textContent = `Hari Mulai: ${DAY_NAMES[startDate.getDay()]}`;
+          const grayActive = els.selGrayColumn.value === 'active';
+          const viewMode = els.selViewMode.value;
           const requiredTC = targetLeaveDays - 1;
-          els.formulaBadge.textContent = `Syarat: ${requiredTC} TC + 1 OFF = ${targetLeaveDays} Hari`;
+
+          // Update UI labels & badges
+          els.startDayName.textContent = `Hari Mulai: ${DAY_NAMES[startDate.getDay()]}`;
+          els.tcNeededHint.textContent = `Butuh ${requiredTC} TC (${requiredTC} minggu)`;
+          els.formulaBadge.textContent = `Rumus: ${requiredTC} TC + 1 OFF = ${targetLeaveDays} Hari di Rumah`;
           els.grayHint.textContent = grayActive
-            ? `Hari setelah C${requiredTC} langsung masuk X1`
-            : `1 hari kosong abu-abu setelah C${requiredTC}`;
+            ? `Setelah C${requiredTC} langsung masuk X1`
+            : `1 hari transisi pasca C${requiredTC}`;
           els.viewHint.textContent = viewMode === 'full_year'
-            ? `Menampilkan Jan – Des ${startDate.getFullYear()}`
+            ? `Januari – Desember ${startDate.getFullYear()}`
             : `Mulai ${MONTH_SHORT[startDate.getMonth()]} ${startDate.getFullYear()} (12 bln)`;
+
+          const empName = els.inpName.value.trim() || 'Karyawan';
+          const empRole = els.inpRole.value.trim() || 'Staff';
+          els.activeEmpChip.textContent = `${empName} • ${empRole}`;
 
           // Highlight active preset button
           document.querySelectorAll('.preset-btn').forEach(btn => {
             const pDays = parseInt(btn.getAttribute('data-preset-days'), 10);
             if (pDays === targetLeaveDays) {
-              btn.className = 'preset-btn px-2 py-0.5 text-[11px] font-semibold rounded-md bg-kan-900 text-white border border-kan-900 transition cursor-pointer';
+              btn.className = 'preset-btn px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-kan-900 text-white border border-kan-900 shadow-2xs transition cursor-pointer';
             } else {
-              btn.className = 'preset-btn px-2 py-0.5 text-[11px] font-semibold rounded-md bg-white border border-slate-300 hover:border-kan-600 hover:text-kan-700 transition cursor-pointer';
+              btn.className = 'preset-btn px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-white border border-slate-300 text-slate-700 hover:border-indigo-600 hover:text-indigo-700 transition cursor-pointer';
             }
           });
 
-          // Determine the 12 months to render
+          // Toggle Jump Gray button state
+          if (grayActive) {
+            els.btnJumpGrayCell.classList.add('opacity-45', 'pointer-events-none');
+            els.btnJumpGrayCell.title = 'Kolom Abu-Abu sedang dalam mode Aktif (Langsung X1)';
+          } else {
+            els.btnJumpGrayCell.classList.remove('opacity-45', 'pointer-events-none');
+            els.btnJumpGrayCell.title = 'Sorot Kotak Abu-Abu (Hari Kembali ke Site) pertama';
+          }
+
+          // Determine 12-month display list
           const monthsList = [];
           const startYear = startDate.getFullYear();
           const startMonth = viewMode === 'full_year' ? 0 : startDate.getMonth();
@@ -824,18 +944,18 @@ firebase deploy</pre>
           const lastMonthObj = monthsList[11];
           const lastWindowDate = new Date(lastMonthObj.year, lastMonthObj.month, lastMonthObj.daysCount);
 
-          // Simulate day-by-day starting from startDate up to lastWindowDate + buffer (to finish any active leave block)
-          const simEndDate = addDays(lastWindowDate, targetLeaveDays + 5);
+          // Simulate day-by-day with buffer beyond lastWindowDate so leave ranges never truncate
+          const simEndDate = addDays(lastWindowDate, targetLeaveDays + 14);
           const dayMap = new Map();
           const leavePeriods = [];
 
           let cycleNumber = 1;
-          let workDayCounter = 0;
-          let weekDayIndex = 0; // 0..4 = X, 5 = TC, 6 = OFF
+          let cycleDayCounter = 0; // 1..7 in week 1 (X1..X5, TC1, OFF), 8..14 in week 2 (X8..X12, TC2, OFF), etc.
           let tcCounter = 0;
           let mode = 'WORK_CYCLE'; // 'WORK_CYCLE' | 'LEAVE_C' | 'POST_LEAVE_GRAY'
           let leaveCDayIndex = 0;
           let currentLeaveBlock = null;
+          let pendingFinalTcRef = null;
 
           let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
 
@@ -844,39 +964,93 @@ firebase deploy</pre>
             const inDisplayWindow = cursor >= firstWindowDate && cursor <= lastWindowDate;
 
             if (mode === 'WORK_CYCLE') {
-              if (weekDayIndex < 5) {
-                workDayCounter++;
+              cycleDayCounter++;
+              const dayInWeek = (cycleDayCounter - 1) % 7; // 0..4 = X, 5 = TC, 6 = OFF
+              const weekInCycle = Math.floor((cycleDayCounter - 1) / 7) + 1;
+
+              if (dayInWeek < 5) {
+                const isCycleStart = cycleDayCounter === 1;
+                const code = `X${cycleDayCounter}`;
+                const nextTcNum = tcCounter + 1;
+                const remainingWorkDaysToTc = 5 - dayInWeek;
+
                 dayMap.set(key, {
                   date: new Date(cursor),
-                  code: `X${workDayCounter}`,
-                  category: 'WORK',
+                  code,
+                  badge: `${code} • Siklus #${cycleNumber}`,
+                  category: isCycleStart ? 'WORK_X1' : 'WORK',
+                  isMilestone: isCycleStart,
+                  icon: isCycleStart ? '🚀' : '🏢',
                   cycle: cycleNumber,
-                  desc: `Hari Kerja Site ke-${workDayCounter} (Siklus #${cycleNumber} — Minggu ke-${Math.floor((workDayCounter - 1) / 5) + 1})`
+                  title: isCycleStart
+                    ? `🚀 Awal Siklus Kerja Baru (X1 — Siklus ke-${cycleNumber})`
+                    : `🏢 Hari Kerja On-Site (${code} — Siklus ke-${cycleNumber})`,
+                  advice: isCycleStart
+                    ? `Hari pertama on-site di siklus ke-${cycleNumber}. Target berikutnya: kumpulkan ${requiredTC} TC selama ${requiredTC} minggu untuk mendapatkan ${targetLeaveDays} hari penuh di rumah.`
+                    : `Hari kerja ke-${dayInWeek + 1} pada minggu ke-${weekInCycle} (Siklus #${cycleNumber}). Kurang ${remainingWorkDaysToTc} hari kerja lagi menuju TC${nextTcNum}.`,
+                  extra: isCycleStart ? `Target Cuti Rumah: ${targetLeaveDays} Hari (1 OFF + ${requiredTC} TC)` : ''
                 });
-                weekDayIndex++;
-              } else if (weekDayIndex === 5) {
+              } else if (dayInWeek === 5) {
                 tcCounter++;
-                dayMap.set(key, {
-                  date: new Date(cursor),
-                  code: `TC${tcCounter}`,
-                  category: 'TC',
-                  cycle: cycleNumber,
-                  desc: `Tabungan Cuti ke-${tcCounter} dari ${requiredTC} (Siklus #${cycleNumber})`
-                });
-                weekDayIndex++;
-              } else if (weekDayIndex === 6) {
+                const isFinalTc = tcCounter >= requiredTC;
+                const code = `TC${tcCounter}`;
+
+                if (isFinalTc) {
+                  // Predict upcoming home leave range for rich tooltip guidance
+                  const upcomingOffDate = addDays(cursor, 1);
+                  const upcomingCStart = addDays(cursor, 2);
+                  const upcomingCEnd = addDays(cursor, 1 + requiredTC);
+
+                  const entry = {
+                    date: new Date(cursor),
+                    code,
+                    badge: `${code}/${requiredTC} TC • SIAP PULANG`,
+                    category: 'FINAL_TC',
+                    isMilestone: true,
+                    icon: '🎯',
+                    cycle: cycleNumber,
+                    title: `🎯 Target Tabungan Cuti Tercapai! (${code} — Hari Keberangkatan)`,
+                    advice: `Manfaatkan hari ini sebagai Traveling Day keberangkatanmu! Setelah jam kerja selesai, kamu sudah bisa memulai perjalanan pulang ke POH agar waktu istirahat di rumah maksimal.`,
+                    extra: `Saldo: ${requiredTC}/${requiredTC} TC Penuh • Jadwal di Rumah: ${formatIndoDate(upcomingOffDate, true)} s/d ${formatIndoDate(upcomingCEnd, true)} (${targetLeaveDays} hari)`
+                  };
+                  dayMap.set(key, entry);
+                  pendingFinalTcRef = new Date(cursor);
+                } else {
+                  const remainingTc = requiredTC - tcCounter;
+                  dayMap.set(key, {
+                    date: new Date(cursor),
+                    code,
+                    badge: `${code} dari ${requiredTC} TC`,
+                    category: 'TC',
+                    isMilestone: false,
+                    icon: '💰',
+                    cycle: cycleNumber,
+                    title: `💰 Tabungan Cuti Bertambah (${code} dari ${requiredTC})`,
+                    advice: `Kerja di hari ke-6 siklus dihitung penuh 1 TC. Kurang ${remainingTc} TC lagi menuju jadwal pulang berikutnya.`,
+                    extra: `Progres Tabungan Cuti Siklus #${cycleNumber}: ${tcCounter}/${requiredTC} TC`
+                  });
+                }
+              } else if (dayInWeek === 6) {
                 if (tcCounter >= requiredTC) {
-                  // Trigger Home Leave! This OFF day is Day 1 at home.
+                  // Trigger Home Leave! Weekly OFF becomes Day 1 at home.
+                  const cEndPredicted = addDays(cursor, requiredTC);
                   dayMap.set(key, {
                     date: new Date(cursor),
                     code: 'OFF',
+                    badge: `Hari ke-1/${targetLeaveDays} di Rumah`,
                     category: 'LEAVE_OFF',
+                    isMilestone: true,
+                    icon: '✈️',
                     cycle: cycleNumber,
-                    desc: `Hari ke-1 di Rumah (OFF Awal Pulang — Cuti ke-${cycleNumber} dari ${targetLeaveDays} hari)`
+                    title: `✈️ Hari Pertama di Rumah (OFF Mingguan)`,
+                    advice: `Hari istirahat mingguanmu resmi menyatu dengan blok cuti. Mulai hari ini hingga C${requiredTC}, kamu menikmati total ${targetLeaveDays} hari penuh di rumah.`,
+                    extra: `Periode Penuh di Rumah: ${formatIndoDate(cursor, true)} s/d ${formatIndoDate(cEndPredicted, true)}`
                   });
 
                   currentLeaveBlock = {
                     cycle: cycleNumber,
+                    tcLastDate: pendingFinalTcRef,
+                    tcLastCode: `TC${requiredTC}`,
                     offStartDate: new Date(cursor),
                     cStartDate: null,
                     cEndDate: null,
@@ -885,6 +1059,7 @@ firebase deploy</pre>
                     totalHomeDays: targetLeaveDays,
                     inWindow: inDisplayWindow
                   };
+                  pendingFinalTcRef = null;
 
                   mode = 'LEAVE_C';
                   leaveCDayIndex = 0;
@@ -893,11 +1068,15 @@ firebase deploy</pre>
                   dayMap.set(key, {
                     date: new Date(cursor),
                     code: 'OFF',
+                    badge: `Libur Site • ${tcCounter}/${requiredTC} TC`,
                     category: 'SITE_OFF',
+                    isMilestone: false,
+                    icon: '🛌',
                     cycle: cycleNumber,
-                    desc: `Libur Mingguan di Site (Siklus #${cycleNumber} — TC terkumpul: ${tcCounter}/${requiredTC})`
+                    title: `🛌 Istirahat Mingguan di Site (OFF)`,
+                    advice: `Hari libur mingguan rutin (sistem 5:2). Gunakan untuk pemulihan fisik di mess/site.`,
+                    extra: `Saldo TC saat ini: ${tcCounter} dari ${requiredTC} TC`
                   });
-                  weekDayIndex = 0;
                 }
               }
             } else if (mode === 'LEAVE_C') {
@@ -909,15 +1088,32 @@ firebase deploy</pre>
               }
               currentLeaveBlock.cEndDate = new Date(cursor);
 
-              dayMap.set(key, {
-                date: new Date(cursor),
-                code: `C${leaveCDayIndex}`,
-                category: 'LEAVE_C',
-                cycle: cycleNumber,
-                desc: `Cuti di Rumah Hari ke-${leaveCDayIndex + 1} dari ${targetLeaveDays} (C${leaveCDayIndex} — Periode Cuti ke-${cycleNumber})`
-              });
+              const dayAtHomeNum = leaveCDayIndex + 1; // OFF was day 1
+              const isFinalLeaveDay = leaveCDayIndex >= requiredTC;
+              const code = `C${leaveCDayIndex}`;
 
-              if (leaveCDayIndex >= requiredTC) {
+              if (isFinalLeaveDay) {
+                const returnAdvice = !grayActive
+                  ? `Hari terakhir cutimu di rumah. Besok adalah Hari Perjalanan Kembali (Kotak Abu-Abu)—atur jadwal penerbangan & perjalanan darat menuju site agar siap on-duty Lusa (X1).`
+                  : `Hari terakhir cutimu di rumah. Karena opsi kolom abu-abu aktif, besok kamu sudah wajib on-duty (X1) di site—pastikan perjalanan kembali dilakukan hari ini.`;
+
+                const nextStepExtra = !grayActive
+                  ? `Transisi Kembali: ${formatIndoDate(addDays(cursor, 1), true)} • Wajib X1: ${formatIndoDate(addDays(cursor, 2), true)}`
+                  : `Wajib Masuk X1: ${formatIndoDate(addDays(cursor, 1), true)}`;
+
+                dayMap.set(key, {
+                  date: new Date(cursor),
+                  code,
+                  badge: `${code} • Hari ke-${dayAtHomeNum}/${targetLeaveDays}`,
+                  category: 'FINAL_LEAVE_C',
+                  isMilestone: true,
+                  icon: '🧳',
+                  cycle: cycleNumber,
+                  title: `🧳 Hari Terakhir Cuti di Rumah (${code})`,
+                  advice: returnAdvice,
+                  extra: nextStepExtra
+                });
+
                 if (!grayActive) {
                   mode = 'POST_LEAVE_GRAY';
                 } else {
@@ -927,31 +1123,49 @@ firebase deploy</pre>
                   }
                   currentLeaveBlock = null;
                   cycleNumber++;
-                  workDayCounter = 0;
-                  weekDayIndex = 0;
+                  cycleDayCounter = 0;
                   tcCounter = 0;
                   mode = 'WORK_CYCLE';
                 }
+              } else {
+                const remainingHomeDays = targetLeaveDays - dayAtHomeNum;
+                dayMap.set(key, {
+                  date: new Date(cursor),
+                  code,
+                  badge: `${code} • Hari ke-${dayAtHomeNum}/${targetLeaveDays}`,
+                  category: 'LEAVE_C',
+                  isMilestone: false,
+                  icon: '🏡',
+                  cycle: cycleNumber,
+                  title: `🏡 Masa Cuti di Rumah (Hari ke-${dayAtHomeNum} dari ${targetLeaveDays} Hari)`,
+                  advice: `Nikmati masa istirahat bersama keluarga. Tersisa ${remainingHomeDays} hari lagi di rumah sebelum jadwal perjalanan kembali ke site.`,
+                  extra: `Periode Cuti Siklus #${cycleNumber} (${cycleNumber}x)`
+                });
               }
             } else if (mode === 'POST_LEAVE_GRAY') {
+              const nextX1Obj = addDays(cursor, 1);
               dayMap.set(key, {
                 date: new Date(cursor),
-                code: '',
+                code: '✈',
+                badge: `Kotak Abu-Abu • Siklus #${cycleNumber}`,
                 category: 'GRAY_TRANSITION',
+                isMilestone: true,
+                icon: '🛫',
                 cycle: cycleNumber,
-                desc: `Kolom Abu-Abu / Hari Transisi Pasca-Cuti ke-${cycleNumber} (Peluang Traveling Day kembali ke Site sebelum X1 besok)`
+                title: `🛫 Peluang Traveling Day Kembali ke Site`,
+                advice: `Manfaatkan hari ini sebagai Traveling Day kembali ke site (perjalanan darat 4–5 jam + penerbangan), sehingga besok pagi kamu mulai X1 dalam kondisi bugar.`,
+                extra: `Mulai Kerja Siklus #${cycleNumber + 1} (X1): ${formatIndoDate(nextX1Obj, true)}`
               });
 
               currentLeaveBlock.transitionDate = new Date(cursor);
-              currentLeaveBlock.nextX1Date = addDays(cursor, 1);
+              currentLeaveBlock.nextX1Date = nextX1Obj;
               if (currentLeaveBlock.inWindow) {
                 leavePeriods.push(currentLeaveBlock);
               }
               currentLeaveBlock = null;
 
               cycleNumber++;
-              workDayCounter = 0;
-              weekDayIndex = 0;
+              cycleDayCounter = 0;
               tcCounter = 0;
               mode = 'WORK_CYCLE';
             }
@@ -959,7 +1173,7 @@ firebase deploy</pre>
             cursor = addDays(cursor, 1);
           }
 
-          // KPI counters within the 12-month window
+          // KPI counters within the 12-month display window
           let totalWork = 0;
           let totalTc = 0;
           let totalSiteOff = 0;
@@ -968,21 +1182,32 @@ firebase deploy</pre>
           let totalGray = 0;
           const distinctLeaveCyclesInWindow = new Set();
 
-          // Build Table Rows
           const tbodyFragment = document.createDocumentFragment();
           const exportMatrixRows = [];
+          const exportCellMeta = []; // stores styling & comment info per row/col for SheetJS
+
+          let firstFinalTcEntry = null;
+          let firstGrayEntry = null;
+          let firstFinalTcTd = null;
+          let firstGrayTd = null;
 
           monthsList.forEach((mObj) => {
             const tr = document.createElement('tr');
             tr.className = 'hover:bg-slate-50/70 transition-colors';
 
-            // Determine Roster badge for this month (if any LEAVE_C falls in this month)
             const monthCycles = new Set();
             const rowCellsData = [];
 
             for (let d = 1; d <= 31; d++) {
               if (d > mObj.daysCount) {
-                rowCellsData.push({ category: 'INVALID_DATE', code: '', desc: 'Tanggal tidak ada pada kalender bulan ini' });
+                rowCellsData.push({
+                  category: 'INVALID_DATE',
+                  code: '',
+                  badge: 'Non-Kalender',
+                  icon: '⬛',
+                  title: 'Tanggal Tidak Ada di Kalender',
+                  advice: `Bulan ${MONTH_FULL[mObj.month]} ${mObj.year} hanya memiliki ${mObj.daysCount} hari.`
+                });
                 continue;
               }
 
@@ -992,7 +1217,10 @@ firebase deploy</pre>
                   date: cellDate,
                   category: 'PRE_X1',
                   code: '',
-                  desc: 'Sebelum Tanggal Mulai Kerja (Pre-X1)'
+                  badge: 'Pra-X1',
+                  icon: '⬜',
+                  title: '⬜ Pra-Mulai Kerja (Belum X1)',
+                  advice: `Tanggal ini berada sebelum tanggal mulai kerja (X1: ${formatIndoDate(startDate, true)}) yang dipilih.`
                 });
                 continue;
               }
@@ -1000,19 +1228,17 @@ firebase deploy</pre>
               const info = dayMap.get(toDateKey(cellDate));
               if (info) {
                 rowCellsData.push(info);
-                if (info.category === 'WORK') totalWork++;
-                else if (info.category === 'TC') totalTc++;
+                if (info.category === 'WORK' || info.category === 'WORK_X1') totalWork++;
+                else if (info.category === 'TC' || info.category === 'FINAL_TC') totalTc++;
                 else if (info.category === 'SITE_OFF') totalSiteOff++;
                 else if (info.category === 'LEAVE_OFF') totalLeaveOff++;
-                else if (info.category === 'LEAVE_C') {
+                else if (info.category === 'LEAVE_C' || info.category === 'FINAL_LEAVE_C') {
                   totalLeaveC++;
                   monthCycles.add(`${info.cycle}x`);
                   distinctLeaveCyclesInWindow.add(info.cycle);
                 } else if (info.category === 'GRAY_TRANSITION') {
                   totalGray++;
                 }
-              } else {
-                rowCellsData.push({ date: cellDate, category: 'PRE_X1', code: '', desc: '' });
               }
             }
 
@@ -1034,74 +1260,120 @@ firebase deploy</pre>
             const tdRoster = document.createElement('td');
             tdRoster.className = 'sticky-col-3 bg-white border border-slate-200 px-2 py-1.5 font-sans font-bold text-emerald-700';
             if (rosterLabel) {
-              tdRoster.innerHTML = `<span class="inline-block px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px]">${rosterLabel}</span>`;
+              tdRoster.innerHTML = `<span class="inline-block px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-900 text-[10px] font-extrabold">${rosterLabel}</span>`;
             } else {
               tdRoster.textContent = '-';
               tdRoster.classList.add('text-slate-300');
             }
             tr.appendChild(tdRoster);
 
-            // Day 1..31 cells
             const excelRow = [mObj.index, mObj.label, rosterLabel || ''];
+            const excelRowMeta = [null, null, null];
 
             rowCellsData.forEach((cell) => {
               const td = document.createElement('td');
-              td.className = 'ts-cell border border-slate-200 py-1.5 px-0.5 font-semibold tracking-tighter cursor-default';
+              td.className = 'ts-cell border border-slate-200 py-1.5 px-0.5 font-semibold tracking-tighter cursor-pointer';
 
               switch (cell.category) {
+                case 'WORK_X1':
+                  td.classList.add('bg-sky-50', 'text-indigo-950', 'font-extrabold', 'ring-1', 'ring-inset', 'ring-indigo-300');
+                  td.textContent = cell.code;
+                  excelRow.push(cell.code);
+                  excelRowMeta.push({ type: 'WORK_X1', comment: `${cell.title}\n${cell.advice}` });
+                  break;
+
                 case 'WORK':
                   td.classList.add('bg-white', 'text-slate-800');
                   td.textContent = cell.code;
                   excelRow.push(cell.code);
+                  excelRowMeta.push({ type: 'WORK', comment: null });
                   break;
+
                 case 'TC':
-                  td.classList.add('bg-amber-200', 'text-amber-900', 'font-bold');
+                  td.classList.add('bg-amber-100', 'text-amber-900', 'font-bold');
                   td.textContent = cell.code;
                   excelRow.push(cell.code);
+                  excelRowMeta.push({ type: 'TC', comment: null });
                   break;
+
+                case 'FINAL_TC':
+                  td.classList.add('bg-amber-200', 'text-amber-950', 'font-extrabold', 'ring-2', 'ring-inset', 'ring-amber-500');
+                  td.innerHTML = `<span>${cell.code}</span><span class="milestone-dot w-1.5 h-1.5 rounded-full bg-rose-600 absolute top-0.5 right-0.5"></span>`;
+                  excelRow.push(cell.code);
+                  excelRowMeta.push({ type: 'FINAL_TC', comment: `${cell.title}\n${cell.advice}\n${cell.extra || ''}` });
+                  if (!firstFinalTcEntry) {
+                    firstFinalTcEntry = cell;
+                    firstFinalTcTd = td;
+                  }
+                  break;
+
                 case 'SITE_OFF':
-                  td.classList.add('bg-sky-200', 'text-sky-900', 'font-bold');
+                  td.classList.add('bg-sky-100', 'text-sky-900', 'font-bold');
                   td.textContent = cell.code;
                   excelRow.push(cell.code);
+                  excelRowMeta.push({ type: 'SITE_OFF', comment: null });
                   break;
+
                 case 'LEAVE_OFF':
-                  td.classList.add('bg-emerald-300', 'text-emerald-950', 'font-extrabold', 'ring-1', 'ring-inset', 'ring-emerald-500');
-                  td.textContent = cell.code;
-                  excelRow.push(`${cell.code} (Cuti)`);
+                  td.classList.add('bg-emerald-200', 'text-emerald-950', 'font-extrabold', 'ring-1', 'ring-inset', 'ring-emerald-500');
+                  td.innerHTML = `<span>${cell.code}</span><span class="w-1.5 h-1.5 rounded-full bg-emerald-700 absolute top-0.5 right-0.5"></span>`;
+                  excelRow.push(`${cell.code}`);
+                  excelRowMeta.push({ type: 'LEAVE_OFF', comment: `${cell.title}\n${cell.advice}` });
                   break;
+
                 case 'LEAVE_C':
-                  td.classList.add('bg-emerald-200', 'text-emerald-950', 'font-bold');
+                  td.classList.add('bg-emerald-100', 'text-emerald-950', 'font-bold');
                   td.textContent = cell.code;
                   excelRow.push(cell.code);
+                  excelRowMeta.push({ type: 'LEAVE_C', comment: null });
                   break;
+
+                case 'FINAL_LEAVE_C':
+                  td.classList.add('bg-emerald-200', 'text-emerald-950', 'font-extrabold', 'ring-1', 'ring-inset', 'ring-emerald-600');
+                  td.innerHTML = `<span>${cell.code}</span><span class="w-1.5 h-1.5 rounded-full bg-amber-600 absolute top-0.5 right-0.5"></span>`;
+                  excelRow.push(cell.code);
+                  excelRowMeta.push({ type: 'FINAL_LEAVE_C', comment: `${cell.title}\n${cell.advice}` });
+                  break;
+
                 case 'GRAY_TRANSITION':
-                  td.classList.add('bg-slate-500', 'border-slate-600');
-                  td.textContent = '';
-                  excelRow.push('[Transisi]');
+                  td.classList.add('bg-slate-600', 'text-slate-100', 'border-slate-700', 'font-sans', 'text-[10px]');
+                  td.innerHTML = `<span>✈</span><span class="milestone-dot w-1.5 h-1.5 rounded-full bg-amber-400 absolute top-0.5 right-0.5"></span>`;
+                  excelRow.push('TRAVEL');
+                  excelRowMeta.push({ type: 'GRAY_TRANSITION', comment: `${cell.title}\n${cell.advice}` });
+                  if (!firstGrayEntry) {
+                    firstGrayEntry = cell;
+                    firstGrayTd = td;
+                  }
                   break;
+
                 case 'PRE_X1':
-                  td.classList.add('bg-slate-700', 'border-slate-700');
+                  td.classList.add('bg-slate-300', 'border-slate-300');
                   td.textContent = '';
                   excelRow.push('');
+                  excelRowMeta.push({ type: 'PRE_X1', comment: null });
                   break;
+
                 case 'INVALID_DATE':
                 default:
-                  td.classList.add('bg-slate-900', 'border-slate-900');
+                  td.classList.add('bg-slate-400/70', 'border-slate-400/70');
                   td.textContent = '';
-                  excelRow.push('X');
+                  excelRow.push('');
+                  excelRowMeta.push({ type: 'INVALID_DATE', comment: null });
                   break;
               }
 
-              // Tooltip handlers
+              // Interactive Hover & Click/Tap Handlers
               if (cell.category !== 'INVALID_DATE' && cell.date) {
-                const dateStr = formatIndoDate(cell.date, false);
-                const codeStr = cell.code ? `Kode: ${cell.code}` : (cell.category === 'GRAY_TRANSITION' ? 'Status: Kolom Abu-Abu (Transisi)' : 'Status: Belum Mulai Kerja');
-                td.addEventListener('mouseenter', (e) => showTooltip(e, dateStr, codeStr, cell.desc));
+                td.addEventListener('mouseenter', (e) => {
+                  showTooltip(e, cell);
+                  updateInspectorBar(cell, td, false);
+                });
                 td.addEventListener('mousemove', moveTooltip);
                 td.addEventListener('mouseleave', hideTooltip);
                 td.addEventListener('click', (e) => {
-                  showTooltip(e, dateStr, codeStr, cell.desc);
+                  showTooltip(e, cell);
                   moveTooltip(e);
+                  updateInspectorBar(cell, td, true);
                 });
               }
 
@@ -1110,28 +1382,63 @@ firebase deploy</pre>
 
             tbodyFragment.appendChild(tr);
             exportMatrixRows.push(excelRow);
+            exportCellMeta.push(excelRowMeta);
           });
 
           els.matrixBody.innerHTML = '';
           els.matrixBody.appendChild(tbodyFragment);
 
+          // Pre-populate Pinned Guidance Inspector with First Final TC (or X1 if no leave cycle in range)
+          selectedCellElement = null;
+          if (firstFinalTcEntry) {
+            updateInspectorBar(firstFinalTcEntry, firstFinalTcTd, false);
+          } else {
+            const firstWorkEntry = dayMap.get(toDateKey(startDate));
+            if (firstWorkEntry) {
+              updateInspectorBar(firstWorkEntry, null, false);
+            }
+          }
+
+          // Wire Quick Jump buttons
+          els.btnJumpFinalTc.onclick = () => {
+            if (firstFinalTcEntry && firstFinalTcTd) {
+              updateInspectorBar(firstFinalTcEntry, firstFinalTcTd, true);
+              firstFinalTcTd.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+              showToast(`Menyorot ${firstFinalTcEntry.code} (${formatIndoDate(firstFinalTcEntry.date, true)})`);
+            } else {
+              showToast('Belum ada TC terakhir pada rentang tampilan ini.', 'error');
+            }
+          };
+
+          els.btnJumpGrayCell.onclick = () => {
+            if (!grayActive && firstGrayEntry && firstGrayTd) {
+              updateInspectorBar(firstGrayEntry, firstGrayTd, true);
+              firstGrayTd.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+              showToast(`Menyorot Kotak Abu-Abu (${formatIndoDate(firstGrayEntry.date, true)})`);
+            } else {
+              showToast('Kotak abu-abu tidak tersedia pada pengaturan saat ini.', 'error');
+            }
+          };
+
           // Update KPI Cards
           const cycleOnSiteDays = requiredTC * 7;
+          const totalOffAll = totalSiteOff + totalLeaveOff;
           const totalHomeDays = totalLeaveOff + totalLeaveC;
           const freqCount = distinctLeaveCyclesInWindow.size;
 
-          els.kpiLeaveCount.textContent = `${freqCount}x`;
-          els.kpiLeaveSub.textContent = `Siklus on-site: ${cycleOnSiteDays} hari (${requiredTC} mgg)`;
           els.kpiWorkDays.textContent = totalWork;
           els.kpiTcDays.textContent = totalTc;
           els.kpiTcSub.textContent = `${requiredTC} TC per siklus cuti`;
-          els.kpiSiteOffDays.textContent = totalSiteOff;
+          els.kpiTotalOffDays.textContent = totalOffAll;
+          els.kpiOffSub.textContent = `${totalSiteOff} site + ${totalLeaveOff} awal pulang`;
+          els.kpiLeaveCount.textContent = `${freqCount}x`;
+          els.kpiLeaveSub.textContent = `Siklus on-site: ${cycleOnSiteDays} hari (${requiredTC} mgg)`;
           els.kpiHomeDays.textContent = totalHomeDays;
           els.kpiHomeSub.textContent = `${totalLeaveOff} OFF awal + ${totalLeaveC} hari C`;
           els.kpiGrayDays.textContent = totalGray;
-          els.kpiGraySub.textContent = grayActive ? 'Mode Aktif (Langsung X1)' : '1 hari kosong pasca-cuti';
+          els.kpiGraySub.textContent = grayActive ? 'Mode Aktif (Langsung X1)' : 'Peluang Traveling Day';
 
-          // Update Home Passage comparison badge
+          // Update Home Passage OL Comparison Badge
           if (freqCount <= 3) {
             els.homePassageBadge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200';
             els.homePassageBadge.textContent = `Sesuai Kuota Home Passage OL (3x / Tahun)`;
@@ -1140,50 +1447,92 @@ firebase deploy</pre>
             els.homePassageBadge.textContent = `Catatan: ${freqCount}x pulang (Kuota tiket OL: 3x / Tahun)`;
           }
 
-          // Update Leave Breakdown Table
+          // Render Cycle Breakdown Table
           renderLeaveBreakdown(leavePeriods, grayActive, targetLeaveDays);
 
           // Update Print Metadata
           updatePrintMetadata(startDate, targetLeaveDays, grayActive, viewMode);
 
-          // Save state for Excel Export
+          // Store simulation state for Excel Export
           latestSimulation = {
             employee: {
-              name: els.inpName.value.trim() || '-',
+              name: empName,
               nik: els.inpNik.value.trim() || '-',
-              role: els.inpRole.value.trim() || '-',
+              role: empRole,
               dept: els.inpDept.value.trim() || '-',
+              location: els.inpLocation.value.trim() || '-',
               startDateStr: formatIndoDate(startDate, false),
               targetLeaveDays,
               requiredTC,
-              grayStatusText: grayActive ? 'Aktif (Langsung Wajib Masuk X1)' : 'Tidak Aktif (Kosong Abu-Abu / Peluang Travel)',
-              viewModeText: viewMode === 'full_year' ? '1 Tahun Kalender Penuh (Januari – Desember)' : '12 Bulan Berjalan (Mulai dari Bulan X1)'
+              grayStatusText: grayActive ? 'Aktif (Langsung Wajib Masuk X1)' : 'Tidak Aktif (Kotak Abu-Abu / Peluang Traveling Day)',
+              viewModeText: viewMode === 'full_year' ? '1 Tahun Kalender Penuh (Jan – Des)' : '12 Bulan Berjalan (Mulai Bulan X1)'
             },
             kpis: {
-              freqCount,
               totalWork,
               totalTc,
               totalSiteOff,
               totalLeaveOff,
+              totalOffAll,
+              freqCount,
               totalLeaveC,
               totalHomeDays,
               totalGray
             },
             exportMatrixRows,
+            exportCellMeta,
             leavePeriods
           };
         } catch (err) {
           console.error('Simulation error:', err);
-          showToast('Terjadi kesalahan perhitungan jadwal. Periksa kembali format tanggal.', 'error');
+          showToast('Terjadi kesalahan saat menghitung jadwal. Periksa input tanggal.', 'error');
         }
       }
 
+      // Update Pinned Inspector Guidance Bar
+      function updateInspectorBar(cell, tdElement, lockHighlight) {
+        if (!cell) return;
+
+        if (lockHighlight && tdElement) {
+          if (selectedCellElement) {
+            selectedCellElement.classList.remove('is-selected');
+          }
+          selectedCellElement = tdElement;
+          selectedCellElement.classList.add('is-selected');
+        }
+
+        const dateLabel = cell.date ? formatIndoDate(cell.date, false) : 'Kalender';
+        els.inspIconBox.textContent = cell.icon || '📅';
+        els.inspDateBadge.textContent = `${dateLabel} • ${cell.badge || cell.code || 'Info'}`;
+        els.inspTitle.textContent = cell.title || 'Informasi Jadwal';
+        els.inspAdvice.textContent = cell.advice || '';
+
+        if (cell.extra) {
+          els.inspExtra.textContent = cell.extra;
+          els.inspExtra.classList.remove('hidden');
+        } else {
+          els.inspExtra.textContent = '';
+          els.inspExtra.classList.add('hidden');
+        }
+
+        // Adapt icon box accent based on category
+        if (cell.category === 'FINAL_TC' || cell.category === 'TC') {
+          els.inspIconBox.className = 'w-9 h-9 rounded-xl bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0 text-base shadow-2xs mt-0.5';
+        } else if (cell.category === 'LEAVE_OFF' || cell.category === 'LEAVE_C' || cell.category === 'FINAL_LEAVE_C') {
+          els.inspIconBox.className = 'w-9 h-9 rounded-xl bg-emerald-100 border border-emerald-300 text-emerald-800 flex items-center justify-center shrink-0 text-base shadow-2xs mt-0.5';
+        } else if (cell.category === 'GRAY_TRANSITION') {
+          els.inspIconBox.className = 'w-9 h-9 rounded-xl bg-slate-700 border border-slate-800 text-white flex items-center justify-center shrink-0 text-base shadow-2xs mt-0.5';
+        } else {
+          els.inspIconBox.className = 'w-9 h-9 rounded-xl bg-indigo-100 border border-indigo-300 text-indigo-800 flex items-center justify-center shrink-0 text-base shadow-2xs mt-0.5';
+        }
+      }
+
+      // Render Structured Cycle Breakdown Table
       function renderLeaveBreakdown(leavePeriods, grayActive, targetLeaveDays) {
         if (!leavePeriods.length) {
           els.leaveBreakdownBody.innerHTML = `
             <tr>
               <td colspan="6" class="px-4 py-6 text-center text-slate-500 text-xs sm:text-sm">
-                Belum ada periode cuti yang jatuh di dalam rentang 12 bulan tampilan ini (coba kurangi target hari cuti atau gunakan mode 12 Bulan Berjalan).
+                Belum ada periode cuti yang jatuh pada rentang 12 bulan tampilan ini (coba kurangi target hari cuti atau pilih mode 12 Bulan Berjalan).
               </td>
             </tr>
           `;
@@ -1191,25 +1540,40 @@ firebase deploy</pre>
         }
 
         const rowsHtml = leavePeriods.map((lp) => {
-          const offStr = formatIndoDate(lp.offStartDate, true);
-          const cRangeStr = lp.cStartDate && lp.cEndDate
-            ? `${formatIndoDate(lp.cStartDate, true)} s/d ${formatIndoDate(lp.cEndDate, true)}`
+          const tcLastStr = lp.tcLastDate
+            ? `<div class="font-semibold text-amber-900">${formatIndoDate(lp.tcLastDate, true)}</div>
+               <div class="text-[11px] text-amber-700 font-medium">${lp.tcLastCode} — Traveling Day Berangkat</div>`
             : '-';
-          const grayStr = !grayActive && lp.transitionDate
-            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-200 text-slate-800 font-medium text-xs">${formatIndoDate(lp.transitionDate, true)}</span>`
-            : `<span class="text-slate-400 text-xs italic">Tidak ada (Langsung X1)</span>`;
-          const nextX1Str = lp.nextX1Date ? formatIndoDate(lp.nextX1Date, true) : '-';
+
+          const offStr = `<div class="font-semibold text-emerald-900">${formatIndoDate(lp.offStartDate, true)}</div>
+                          <div class="text-[11px] text-emerald-700">Hari ke-1 di Rumah (OFF)</div>`;
+
+          const cRangeStr = lp.cStartDate && lp.cEndDate
+            ? `<div class="font-medium text-slate-800">${formatIndoDate(lp.cStartDate, true)}</div>
+               <div class="text-[11px] text-slate-500">s/d ${formatIndoDate(lp.cEndDate, true)} (C1–C${targetLeaveDays - 1})</div>`
+            : '-';
+
+          const returnStatusHtml = !grayActive && lp.transitionDate
+            ? `<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-700 text-white font-semibold text-[11px] mb-0.5">
+                 🛫 Travel: ${formatIndoDate(lp.transitionDate, true)}
+               </div>
+               <div class="text-[11px] font-bold text-kan-900">Wajib X1: ${formatIndoDate(lp.nextX1Date, true)}</div>`
+            : `<div class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-900 border border-indigo-200 font-bold text-[11px]">
+                 🚀 Langsung X1: ${formatIndoDate(lp.nextX1Date, true)}
+               </div>`;
 
           return `
-            <tr class="hover:bg-slate-50 transition-colors">
-              <td class="px-4 py-2.5 font-bold text-emerald-800 whitespace-nowrap">Cuti ke-${lp.cycle} (${lp.cycle}x)</td>
-              <td class="px-4 py-2.5 text-slate-800 font-medium whitespace-nowrap">${offStr}</td>
-              <td class="px-4 py-2.5 text-slate-700 whitespace-nowrap">${cRangeStr}</td>
-              <td class="px-4 py-2.5 whitespace-nowrap">
-                <span class="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 font-bold text-xs">${targetLeaveDays} Hari</span>
+            <tr class="hover:bg-slate-50/90 transition-colors">
+              <td class="px-4 py-3 font-extrabold text-emerald-800 whitespace-nowrap">
+                <span class="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 text-xs">Siklus ${lp.cycle}x</span>
               </td>
-              <td class="px-4 py-2.5 whitespace-nowrap">${grayStr}</td>
-              <td class="px-4 py-2.5 font-semibold text-kan-900 whitespace-nowrap">${nextX1Str}</td>
+              <td class="px-4 py-3 whitespace-nowrap">${tcLastStr}</td>
+              <td class="px-4 py-3 whitespace-nowrap">${offStr}</td>
+              <td class="px-4 py-3 whitespace-nowrap">${cRangeStr}</td>
+              <td class="px-4 py-3 whitespace-nowrap">${returnStatusHtml}</td>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <span class="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-xs shadow-2xs">${targetLeaveDays} Hari Penuh</span>
+              </td>
             </tr>
           `;
         }).join('');
@@ -1217,25 +1581,37 @@ firebase deploy</pre>
         els.leaveBreakdownBody.innerHTML = rowsHtml;
       }
 
+      // Sync Print Metadata Fields
       function updatePrintMetadata(startDate, targetLeaveDays, grayActive, viewMode) {
         const empName = els.inpName.value.trim() || '-';
         els.printEmpName.textContent = empName;
         els.printEmpNik.textContent = els.inpNik.value.trim() || '-';
         els.printEmpRole.textContent = els.inpRole.value.trim() || '-';
         els.printEmpDept.textContent = els.inpDept.value.trim() || '-';
+        els.printEmpLocation.textContent = els.inpLocation.value.trim() || '-';
         els.printStartDate.textContent = formatIndoDate(startDate, false);
         els.printLeaveDays.textContent = `${targetLeaveDays} Hari (1 OFF + ${targetLeaveDays - 1} TC)`;
-        els.printGrayStatus.textContent = grayActive ? 'Aktif (Langsung X1)' : 'Tidak Aktif (Kosong Abu-Abu)';
+        els.printGrayStatus.textContent = grayActive ? 'Aktif (Langsung Wajib Masuk X1)' : 'Tidak Aktif (Kotak Abu-Abu / Travel)';
         els.printViewMode.textContent = viewMode === 'full_year' ? '1 Tahun Penuh (Jan–Des)' : '12 Bulan Berjalan';
         els.printSignEmp.textContent = empName;
         els.printTimestamp.textContent = `Dicetak: ${formatIndoDate(new Date(), false)}`;
       }
 
-      // Tooltip Positioning
-      function showTooltip(e, dateStr, codeStr, descStr) {
-        els.ttDate.textContent = dateStr;
-        els.ttCode.textContent = codeStr;
-        els.ttDesc.textContent = descStr;
+      // Floating Tooltip Display & Smart Edge Clamping
+      function showTooltip(e, cell) {
+        els.ttDate.textContent = cell.date ? formatIndoDate(cell.date, false) : '';
+        els.ttBadge.textContent = cell.badge || cell.code || '';
+        els.ttTitle.textContent = cell.title || '';
+        els.ttAdvice.textContent = cell.advice || '';
+
+        if (cell.extra) {
+          els.ttExtra.textContent = cell.extra;
+          els.ttExtra.classList.remove('hidden');
+        } else {
+          els.ttExtra.textContent = '';
+          els.ttExtra.classList.add('hidden');
+        }
+
         els.cellTooltip.classList.remove('hidden');
         moveTooltip(e);
       }
@@ -1261,88 +1637,203 @@ firebase deploy</pre>
         els.cellTooltip.classList.add('hidden');
       }
 
-      // Excel Export (.xlsx) via SheetJS
+      // Multi-sheet Styled Excel Export (.xlsx) with Embedded Cell Comments
       function exportToExcel() {
         if (!latestSimulation) return;
         if (typeof XLSX === 'undefined') {
-          showToast('Library Excel (SheetJS) gagal dimuat. Pastikan koneksi internet aktif.', 'error');
+          showToast('Library Excel belum termuat. Periksa koneksi internet Anda.', 'error');
           return;
         }
 
         try {
-          const { employee, kpis, exportMatrixRows, leavePeriods } = latestSimulation;
+          const { employee, kpis, exportMatrixRows, exportCellMeta, leavePeriods } = latestSimulation;
           const wb = XLSX.utils.book_new();
 
           // Sheet 1: Timesheet Simulasi
-          const sheet1Data = [
-            ['PT KALIMANTAN ALUMINA NUSANTARA (KAN) — SIMULASI TIMESHEET & CUTI KARYAWAN'],
+          const sheet1Rows = [
+            ['PT KALIMANTAN ALUMINA NUSANTARA (KAN) — SIMULASI TIMESHEET & PERENCANAAN CUTI KARYAWAN'],
             [],
-            ['Nama Karyawan', employee.name, '', 'Tanggal Mulai (X1)', employee.startDateStr],
-            ['NIK / ID', employee.nik, '', 'Target Cuti di Rumah', `${employee.targetLeaveDays} Hari (1 OFF + ${employee.requiredTC} TC)`],
-            ['Jabatan', employee.role, '', 'Status Kolom Abu-Abu', employee.grayStatusText],
-            ['Departemen', employee.dept, '', 'Mode Tampilan', employee.viewModeText],
+            ['Nama Karyawan', employee.name, '', '', 'Tanggal Mulai Kerja (X1)', employee.startDateStr],
+            ['NIK / ID', employee.nik, '', '', 'Target Cuti di Rumah', `${employee.targetLeaveDays} Hari (1 OFF + ${employee.requiredTC} TC)`],
+            ['Jabatan', employee.role, '', '', 'Kolom Abu-Abu Pasca-Cuti', employee.grayStatusText],
+            ['Departemen / Divisi', employee.dept, '', '', 'Mode Tampilan Kalender', employee.viewModeText],
+            ['Lokasi Kerja', employee.location, '', '', 'Frekuensi Cuti Periode Ini', `${kpis.freqCount}x`],
             [],
             ['No', 'Bulan', 'Roster', ...Array.from({ length: 31 }, (_, i) => i + 1)],
             ...exportMatrixRows,
             [],
             ['RINGKASAN STATISTIK PERIODE 12 BULAN'],
-            ['Frekuensi Cuti / Pulang', `${kpis.freqCount}x`],
             ['Total Hari Kerja Fisik (X)', kpis.totalWork],
             ['Total Tabungan Cuti (TC)', kpis.totalTc],
-            ['Total Libur Mingguan Site (OFF)', kpis.totalSiteOff],
-            ['Total Hari Cuti di Rumah (OFF Awal + C)', kpis.totalHomeDays],
-            ['Total Hari Transisi (Kolom Abu-Abu)', kpis.totalGray]
+            ['Total Hari OFF Mingguan (Site + Awal Pulang)', kpis.totalOffAll],
+            ['Frekuensi Pulang / Cuti dalam Periode', `${kpis.freqCount}x`],
+            ['Total Hari di Rumah (OFF Awal + C1..Cn)', kpis.totalHomeDays],
+            ['Total Hari Kotak Abu-Abu / Traveling Day', kpis.totalGray]
           ];
 
-          const ws1 = XLSX.utils.aoa_to_sheet(sheet1Data);
+          const ws1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
+
+          // Apply color styles & cell comments if xlsx-js-style is active
+          const headerRowIdx = 8; // 0-indexed row 9 in Excel
+          const matrixStartRowIdx = 9;
+
+          const thinBorder = {
+            top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+            bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
+            left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+            right: { style: 'thin', color: { rgb: 'CBD5E1' } }
+          };
+
+          // Style Title
+          if (ws1['A1']) {
+            ws1['A1'].s = {
+              font: { bold: true, sz: 13, color: { rgb: '0F2342' } }
+            };
+          }
+
+          // Style Table Header Row
+          for (let c = 0; c < 34; c++) {
+            const addr = XLSX.utils.encode_cell({ r: headerRowIdx, c });
+            if (ws1[addr]) {
+              ws1[addr].s = {
+                fill: { fgColor: { rgb: '0F2342' } },
+                font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 },
+                alignment: { horizontal: 'center', vertical: 'center' },
+                border: thinBorder
+              };
+            }
+          }
+
+          // Style Matrix Cells & Attach Guidance Comments
+          const fillPalette = {
+            WORK_X1: { fgColor: { rgb: 'E0F2FE' } },
+            WORK: { fgColor: { rgb: 'FFFFFF' } },
+            TC: { fgColor: { rgb: 'FEF3C7' } },
+            FINAL_TC: { fgColor: { rgb: 'FDE68A' } },
+            SITE_OFF: { fgColor: { rgb: 'E0F2FE' } },
+            LEAVE_OFF: { fgColor: { rgb: 'A7F3D0' } },
+            LEAVE_C: { fgColor: { rgb: 'D1FAE5' } },
+            FINAL_LEAVE_C: { fgColor: { rgb: 'A7F3D0' } },
+            GRAY_TRANSITION: { fgColor: { rgb: '475569' } },
+            PRE_X1: { fgColor: { rgb: 'CBD5E1' } },
+            INVALID_DATE: { fgColor: { rgb: '94A3B8' } }
+          };
+
+          const fontColorPalette = {
+            WORK_X1: '1E1B4B',
+            WORK: '1E293B',
+            TC: '78350F',
+            FINAL_TC: '78350F',
+            SITE_OFF: '0C4A6E',
+            LEAVE_OFF: '064E3B',
+            LEAVE_C: '065F46',
+            FINAL_LEAVE_C: '064E3B',
+            GRAY_TRANSITION: 'FFFFFF',
+            PRE_X1: '64748B',
+            INVALID_DATE: '64748B'
+          };
+
+          exportCellMeta.forEach((rowMeta, rOffset) => {
+            const excelRowIndex = matrixStartRowIdx + rOffset;
+
+            // Style No, Bulan, Roster columns
+            for (let c = 0; c < 3; c++) {
+              const addr = XLSX.utils.encode_cell({ r: excelRowIndex, c });
+              if (ws1[addr]) {
+                ws1[addr].s = {
+                  fill: { fgColor: { rgb: c === 2 && ws1[addr].v ? 'D1FAE5' : 'F8FAFC' } },
+                  font: { bold: true, color: { rgb: c === 2 && ws1[addr].v ? '065F46' : '0F172A' }, sz: 10 },
+                  alignment: { horizontal: c === 1 ? 'left' : 'center', vertical: 'center' },
+                  border: thinBorder
+                };
+              }
+            }
+
+            // Style Day 1..31 columns
+            for (let dIdx = 0; dIdx < 31; dIdx++) {
+              const meta = rowMeta[dIdx + 3];
+              const addr = XLSX.utils.encode_cell({ r: excelRowIndex, c: dIdx + 3 });
+              if (!ws1[addr]) {
+                ws1[addr] = { t: 's', v: '' };
+              }
+              if (meta) {
+                ws1[addr].s = {
+                  fill: fillPalette[meta.type] || { fgColor: { rgb: 'FFFFFF' } },
+                  font: {
+                    bold: meta.type !== 'WORK',
+                    color: { rgb: fontColorPalette[meta.type] || '1E293B' },
+                    sz: 9
+                  },
+                  alignment: { horizontal: 'center', vertical: 'center' },
+                  border: thinBorder
+                };
+
+                if (meta.comment) {
+                  ws1[addr].c = [{ a: 'HR KAN', t: meta.comment }];
+                  ws1[addr].c.hidden = true;
+                }
+              }
+            }
+          });
+
           ws1['!cols'] = [
             { wch: 5 },
-            { wch: 12 },
+            { wch: 13 },
             { wch: 10 },
-            ...Array.from({ length: 31 }, () => ({ wch: 6 }))
+            ...Array.from({ length: 31 }, () => ({ wch: 6.5 }))
           ];
           XLSX.utils.book_append_sheet(wb, ws1, 'Timesheet Simulasi');
 
-          // Sheet 2: Rincian Periode Cuti
-          const sheet2Data = [
-            ['RINCIAN JADWAL PERIODE CUTI DI RUMAH — PT KALIMANTAN ALUMINA NUSANTARA'],
-            [`Nama: ${employee.name} (${employee.nik}) | Jabatan: ${employee.role}`],
+          // Sheet 2: Ringkasan & Jadwal Cuti
+          const sheet2Rows = [
+            ['RINCIAN JADWAL & PANDUAN PERJALANAN CUTI — PT KALIMANTAN ALUMINA NUSANTARA (KAN)'],
+            [`Nama: ${employee.name} (${employee.nik}) | Jabatan: ${employee.role} | Lokasi: ${employee.location}`],
             [],
-            ['Periode', 'Hari ke-1 di Rumah (OFF)', 'Mulai C1', 'Selesai Cn', 'Total di Rumah', 'Hari Transisi (Abu-Abu)', 'Wajib Masuk Kembali (X1)'],
+            [
+              'Siklus',
+              'Tanggal TC Terakhir (Saran Berangkat)',
+              'Tanggal Mulai di Rumah (OFF)',
+              'Mulai C1',
+              'Selesai C Akhir',
+              'Status Hari Kembali (Kotak Abu-Abu / X1)',
+              'Total Hari di Rumah'
+            ],
             ...leavePeriods.map(lp => [
-              `Cuti ke-${lp.cycle} (${lp.cycle}x)`,
+              `Siklus ${lp.cycle}x`,
+              lp.tcLastDate ? `${formatIndoDate(lp.tcLastDate, false)} (${lp.tcLastCode})` : '-',
               formatIndoDate(lp.offStartDate, false),
               lp.cStartDate ? formatIndoDate(lp.cStartDate, false) : '-',
               lp.cEndDate ? formatIndoDate(lp.cEndDate, false) : '-',
-              `${employee.targetLeaveDays} Hari`,
-              lp.transitionDate ? formatIndoDate(lp.transitionDate, false) : 'Tidak ada (Langsung X1)',
-              lp.nextX1Date ? formatIndoDate(lp.nextX1Date, false) : '-'
+              lp.transitionDate
+                ? `Travel: ${formatIndoDate(lp.transitionDate, false)} -> Wajib X1: ${formatIndoDate(lp.nextX1Date, false)}`
+                : `Langsung X1: ${formatIndoDate(lp.nextX1Date, false)}`,
+              `${employee.targetLeaveDays} Hari Penuh`
             ])
           ];
 
-          const ws2 = XLSX.utils.aoa_to_sheet(sheet2Data);
+          const ws2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
           ws2['!cols'] = [
-            { wch: 18 },
-            { wch: 24 },
-            { wch: 24 },
-            { wch: 24 },
-            { wch: 16 },
+            { wch: 14 },
+            { wch: 34 },
             { wch: 26 },
-            { wch: 24 }
+            { wch: 24 },
+            { wch: 24 },
+            { wch: 48 },
+            { wch: 18 }
           ];
-          XLSX.utils.book_append_sheet(wb, ws2, 'Rincian Periode Cuti');
+          XLSX.utils.book_append_sheet(wb, ws2, 'Ringkasan & Jadwal Cuti');
 
           const safeName = employee.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-          const fileName = `Timesheet_KAN_${safeName}_${els.inpStartDate.value}.xlsx`;
+          const fileName = `KAN_Timesheet_${safeName}_${els.inpStartDate.value}.xlsx`;
           XLSX.writeFile(wb, fileName);
-          showToast(`File Excel berhasil diunduh: ${fileName}`);
+          showToast(`Excel berhasil diunduh: ${fileName}`);
         } catch (err) {
           console.error('Excel export error:', err);
           showToast('Gagal mengekspor file Excel.', 'error');
         }
       }
 
-      // Copy CLI command using execCommand fallback (iframe compatible)
+      // Copy CLI command using execCommand fallback (iFrame compatible)
       function copyFirebaseCommand() {
         const text = els.firebaseCmdText.textContent;
         const textarea = document.createElement('textarea');
@@ -1360,12 +1851,13 @@ firebase deploy</pre>
         document.body.removeChild(textarea);
       }
 
-      // Reset to defaults
+      // Reset to default parameters
       function resetDefaults() {
         els.inpName.value = 'Irwan Sutrisno';
-        els.inpNik.value = 'KAN-2027-001';
+        els.inpNik.value = 'KAN-HR-001';
         els.inpRole.value = 'HR Manager';
-        els.inpDept.value = 'Corporate Support - Site KAN';
+        els.inpDept.value = 'Corporate Support Division';
+        els.inpLocation.value = 'Site - PT Kalimantan Alumina Nusantara (KAN)';
         els.inpStartDate.value = '2027-01-04';
         els.inpLeaveDays.value = '14';
         els.selGrayColumn.value = 'inactive';
@@ -1374,12 +1866,13 @@ firebase deploy</pre>
         showToast('Simulasi dikembalikan ke pengaturan default.');
       }
 
-      // Bind Event Listeners
+      // Attach Event Listeners
       [
         els.inpName,
         els.inpNik,
         els.inpRole,
         els.inpDept,
+        els.inpLocation,
         els.inpStartDate,
         els.inpLeaveDays,
         els.selGrayColumn,
@@ -1403,7 +1896,7 @@ firebase deploy</pre>
       });
       els.btnReset.addEventListener('click', resetDefaults);
 
-      // Modal Controls
+      // Modal Dialog Controls
       els.btnDeployGuide.addEventListener('click', () => {
         els.deployModal.classList.remove('hidden');
         els.deployModal.classList.add('flex');
@@ -1419,7 +1912,7 @@ firebase deploy</pre>
       });
       els.btnCopyFirebaseCmd.addEventListener('click', copyFirebaseCommand);
 
-      // Initial render on load
+      // Initialize on load
       window.addEventListener('DOMContentLoaded', runSimulation);
       runSimulation();
     })();
