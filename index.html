@@ -5,12 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>KAN Timesheet &amp; Leave Simulator</title>
 
-  <!-- Font Inter (optional, graceful fallback to system sans-serif) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-
-  <!-- Modular Stylesheet (relative path: compatible with local, GitHub Pages & Firebase) -->
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -22,19 +19,25 @@
         <div class="brand-mark">KAN</div>
         <div>
           <h1 class="brand-title" id="appTitle">KAN Timesheet &amp; Leave Simulator</h1>
-          <p class="brand-subtitle" id="appSubtitle">Simulasi Roster 5:2, Tabungan Cuti, &amp; Kuota Tiket</p>
+          <p class="brand-subtitle" id="appSubtitle">Simulasi Roster 5:2, Carry-Over TC, &amp; Kuota Tiket</p>
         </div>
       </div>
 
       <div class="topbar-actions">
-       <!--  <button type="button" class="btn btn-ghost" id="btnShowConfig" title="Lihat isi konfigurasi aktif dari config.js">  -->
-        <!--   ⚙️ Cek config.js  -->
-        <!-- </button>  -->
+        <button type="button" class="btn" id="btnOpenScenario" title="Simpan, muat, atau export/import skenario JSON">
+          💾 Skenario
+        </button>
+        <button type="button" class="btn btn-soft" id="btnShareLink" title="Salin link simulasi untuk dibagikan ke HR / Atasan">
+          🔗 Bagikan
+        </button>
+        <button type="button" class="btn btn-ghost" id="btnShowConfig" title="Lihat isi konfigurasi aktif dari config.js">
+          ⚙️ config.js
+        </button>
         <button type="button" class="btn" id="btnReset" title="Kembalikan semua input ke default">
           ↺ Reset
         </button>
         <button type="button" class="btn btn-soft" id="btnExportExcel">
-          📊 Export Excel (.xlsx)
+          📊 Excel
         </button>
         <button type="button" class="btn btn-primary" id="btnPrintPdf">
           🖨️ Cetak / PDF
@@ -53,7 +56,7 @@
           <p id="printSubtitle">Simulasi Roster 5:2 &amp; Rencana Pengambilan Cuti</p>
         </div>
         <div style="text-align:right;font-size:9px;color:#64748B;">
-          Dokumen Simulasi Roster Karyawan
+          Dokumen Simulasi Roster Karyawan (v2.0)
         </div>
       </div>
       <div class="print-emp-bar" id="printEmpBar"></div>
@@ -65,7 +68,7 @@
       <!-- CARD 1: PROFIL & MASA KERJA -->
       <div class="card">
         <div class="card-header">
-          <h2 class="card-title"><span class="step-badge">1</span> Profil Karyawan &amp; Masa Kerja</h2>
+          <h2 class="card-title"><span class="step-badge">1</span> Profil Karyawan &amp; Saldo Awal</h2>
         </div>
         <div class="form-grid">
           <div class="field span-2">
@@ -85,8 +88,13 @@
             <input type="date" id="inputJoinDate" />
           </div>
           <div class="field">
-            <label for="inputCtBalance">Saldo Cuti Tahunan (Hari)</label>
+            <label for="inputCtBalance">Saldo Cuti Tahunan (CT)</label>
             <input type="number" id="inputCtBalance" min="0" max="60" step="1" />
+          </div>
+          <div class="field span-2">
+            <label for="inputInitialTc">Saldo Awal TC (Carry-Over Siklus/Tahun Lalu)</label>
+            <input type="number" id="inputInitialTc" min="0" max="30" step="1" />
+            <div class="field-hint">Tabungan TC bawaan sebelum mulai X1. Otomatis mengurangi jumlah minggu kerja untuk pulang lebih cepat atau ditabung lagi.</div>
           </div>
           <div class="field span-2">
             <div class="field-hint" id="joinDateHint"></div>
@@ -105,13 +113,13 @@
             <input type="date" id="inputStartDate" />
           </div>
           <div class="field">
-            <label for="inputHomeDays">Target Hari di Rumah</label>
+            <label for="inputHomeDays">Default Hari di Rumah</label>
             <input type="number" id="inputHomeDays" min="9" max="30" step="1" />
           </div>
           <div class="field span-2">
-            <label>Preset Durasi Cuti</label>
+            <label>Preset Durasi Cuti Default</label>
             <div class="preset-row" id="presetRow"></div>
-            <div class="field-hint" id="labelMinDaysHint">Kunci minimal SOP: 9 hari.</div>
+            <div class="field-hint" id="labelMinDaysHint">Kunci minimal SOP: 9 hari. Durasi tiap periode juga bisa diubah berbeda di tabel bawah.</div>
           </div>
           <div class="field span-2">
             <label for="inputOffDay">Hari OFF Mingguan Departemen</label>
@@ -130,12 +138,12 @@
             <label>Skenario Keberangkatan Minggu Terakhir</label>
             <div class="radio-stack">
               <label class="radio-card">
-                <input type="radio" name="departureMode" value="leave_after_day5" />
-                <span id="labelDepartAfter5">Berangkat setelah hari kerja ke-5 berakhir (Hari ke-6 jadi OFF)</span>
-              </label>
-              <label class="radio-card">
                 <input type="radio" name="departureMode" value="work_day6" />
                 <span id="labelDepartWork6">Masuk kerja penuh di hari ke-6 (TC terakhir terbit)</span>
+              </label>
+              <label class="radio-card">
+                <input type="radio" name="departureMode" value="leave_after_day5" />
+                <span id="labelDepartAfter5">Berangkat setelah hari kerja ke-5 berakhir (Hari ke-6 jadi OFF, jatah C berkurang 1)</span>
               </label>
             </div>
           </div>
@@ -147,9 +155,16 @@
             <label for="inputGrayMode">Jeda Pasca-Cuti</label>
             <select id="inputGrayMode"></select>
           </div>
-          <div class="field span-2">
-            <label for="inputViewMode">Rentang Kalender Matriks</label>
+          <div class="field">
+            <label for="inputViewMode">Rentang Kalender</label>
             <select id="inputViewMode"></select>
+          </div>
+          <div class="field">
+            <label for="inputShowHolidays">Hari Libur Nasional</label>
+            <label class="toggle-inline">
+              <input type="checkbox" id="inputShowHolidays" />
+              <span>Tandai Tanggal Merah ID</span>
+            </label>
           </div>
         </div>
       </div>
@@ -196,25 +211,38 @@
     <!-- 12 x 31 TIMESHEET MATRIX -->
     <section class="card matrix-card">
       <div class="matrix-header-row">
-        <h2 class="card-title">Matriks Timesheet 12 Bulan × 31 Hari</h2>
-        <span class="matrix-meta no-print" id="matrixMeta"></span>
+        <div>
+          <h2 class="card-title">Matriks Timesheet 12 Bulan × 31 Hari</h2>
+          <span class="matrix-meta no-print" id="matrixMeta"></span>
+        </div>
+        <div class="matrix-tools no-print" id="overrideSummaryWrap" style="display:none;">
+          <span class="override-count-pill" id="overrideCountText">0 Override</span>
+          <button type="button" class="btn btn-ghost" id="btnClearOverrides" style="font-size:11.5px;padding:4px 8px;color:#9F1239;">
+            ✕ Reset Semua Override
+          </button>
+        </div>
       </div>
 
       <div class="matrix-wrap">
         <table class="matrix-table" id="matrixTable"></table>
       </div>
 
-      <!-- SELECTED CELL INSPECTOR -->
+      <!-- SELECTED CELL INSPECTOR & QUICK OVERRIDE CONTROLS -->
       <div class="inspector-bar no-print" id="inspectorBar"></div>
     </section>
 
-    <!-- CYCLES SUMMARY & ANNUAL LEAVE ALLOCATOR -->
+    <!-- CYCLES SUMMARY, CARRY-OVER TC & ANNUAL LEAVE ALLOCATOR -->
     <section class="card">
-      <div class="card-header">
-        <h2 class="card-title">Ringkasan Periode Cuti, Kuota Tiket &amp; Alokasi Cuti Tahunan</h2>
-        <button type="button" class="btn btn-ghost no-print" id="btnClearCT" style="font-size:11.5px;padding:4px 8px;">
-          Reset Alokasi CT
-        </button>
+      <div class="card-header" style="flex-wrap:wrap;">
+        <h2 class="card-title">Ringkasan Periode Cuti, Durasi Fleksibel, Carry-Over TC &amp; Alokasi CT</h2>
+        <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost" id="btnClearCycleCustom" style="font-size:11.5px;padding:4px 8px;">
+            Reset Durasi &amp; Simpan TC
+          </button>
+          <button type="button" class="btn btn-ghost" id="btnClearCT" style="font-size:11.5px;padding:4px 8px;">
+            Reset Alokasi CT
+          </button>
+        </div>
       </div>
 
       <div class="cycles-table-wrap">
@@ -225,8 +253,9 @@
               <th>Rentang Kerja di Site</th>
               <th>Tanggal Berangkat</th>
               <th>Akhir Cuti &amp; Kembali</th>
-              <th>Total di Rumah</th>
-              <th>Tambah Cuti Tahunan (CT)</th>
+              <th>Durasi di Rumah (Fleksibel)</th>
+              <th>Carry-Over / Simpan TC</th>
+              <th>Tambah CT</th>
               <th>Status Tiket</th>
             </tr>
           </thead>
@@ -241,10 +270,47 @@
     </section>
 
     <footer class="footer-note no-print">
-      &copy; Hak Cipta By : IrwanS <br> 2024
+      KAN Timesheet Simulator v2.0 • Ubah kode, SOP, hari libur nasional, dan aturan override di <code>config.js</code> tanpa menyentuh kode inti.
     </footer>
 
   </main>
+
+  <!-- SCENARIO MANAGER MODAL -->
+  <div class="modal-backdrop no-print" id="scenarioModal" role="dialog" aria-modal="true" aria-labelledby="scenarioModalTitle">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="scenarioModalTitle">💾 Kelola Skenario &amp; Bagikan Simulasi</h3>
+        <button type="button" class="btn btn-ghost" id="btnCloseScenario">✕ Tutup</button>
+      </div>
+      <div class="modal-body">
+        <div class="scenario-section">
+          <label class="scenario-label" for="inputScenarioName">Simpan Skenario Aktif ke Browser</label>
+          <div class="scenario-save-row">
+            <input type="text" id="inputScenarioName" placeholder="Misal: Skenario A - Pulang Lebaran 2026" />
+            <button type="button" class="btn btn-primary" id="btnSaveScenario">Simpan</button>
+          </div>
+        </div>
+
+        <div class="scenario-section">
+          <div class="scenario-label">Skenario Tersimpan</div>
+          <div id="scenarioList" class="scenario-list"></div>
+        </div>
+
+        <div class="scenario-section scenario-io-box">
+          <div class="scenario-label">Export / Import File JSON &amp; Link Bagikan</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
+            <button type="button" class="btn btn-soft" id="btnExportJson">⬇️ Download JSON</button>
+            <button type="button" class="btn" id="btnImportJson">⬆️ Muat File JSON</button>
+            <button type="button" class="btn btn-primary" id="btnCopyShareFromModal">🔗 Salin Link Simulasi</button>
+            <input type="file" id="inputImportJsonFile" accept=".json,application/json" style="display:none;" />
+          </div>
+          <p style="margin:8px 0 0;font-size:11.5px;color:#64748B;">
+            File JSON dan Link Bagikan menyimpan seluruh profil, carry-over TC, durasi custom tiap periode, alokasi CT, dan override manual (S/I/DL/A).
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- CONFIG PREVIEW MODAL -->
   <div class="modal-backdrop no-print" id="configModal" role="dialog" aria-modal="true" aria-labelledby="configModalTitle">
@@ -256,7 +322,6 @@
       <div class="modal-body">
         <p style="margin-top:0;color:#475569;font-size:12.5px;">
           Semua parameter di bawah dibaca langsung dari <code>window.KAN_CONFIG</code> di file <strong>config.js</strong>.
-          Edit file tersebut di GitHub atau lokal lalu refresh halaman untuk menerapkan perubahan.
         </p>
         <pre class="code-preview" id="configPreviewCode"></pre>
       </div>
@@ -266,10 +331,8 @@
   <!-- TOAST NOTIFICATION -->
   <div class="toast no-print" id="toast" role="status" aria-live="polite"></div>
 
-  <!-- ExcelJS CDN for full-color .xlsx export (graceful CSV fallback if offline) -->
+  <!-- ExcelJS CDN -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-
-  <!-- Load config.js FIRST, then app.js -->
   <script src="./config.js"></script>
   <script src="./app.js"></script>
 </body>
