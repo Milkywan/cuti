@@ -1,9 +1,9 @@
 /**
  * ============================================================================
- * KAN TIMESHEET & LEAVE SIMULATOR — CORE ENGINE & UI CONTROLLER (app.js)
+ * KAN TIMESHEET & LEAVE SIMULATOR — CORE ENGINE & UI CONTROLLER (app.js v2.0)
  * ============================================================================
- * Seluruh kode matriks, aturan SOP, warna, label, dan pesan dibaca dari
- * window.KAN_CONFIG (file config.js).
+ * Fase 1: Carry-Over TC, Durasi Fleksibel per Periode, Kalender Libur Nasional,
+ * Custom Override Sel Manual (S/I/DL/A/OFF*), Shareable URL & Scenario Manager.
  * ============================================================================
  */
 
@@ -16,45 +16,48 @@
     return;
   }
 
-  const STORAGE_KEY = 'kan_timesheet_state_v1';
+  const STORAGE_KEY = 'kan_timesheet_state_v2';
+  const SCENARIOS_KEY = 'kan_timesheet_scenarios_v2';
 
   // ---------- APPLICATION STATE ----------
-  const state = {
-    employeeName: CFG.defaults.employeeName,
-    employeeNik: CFG.defaults.employeeNik,
-    employeeRole: CFG.defaults.employeeRole,
-    joinDate: CFG.defaults.joinDate,
-    startDate: CFG.defaults.startDate,
-    targetHomeDays: Math.max(CFG.rules.minHomeLeaveDays, CFG.rules.defaultHomeLeaveDays),
-    offDay: CFG.rules.defaultOffDay,
-    departureMode: CFG.rules.defaultDepartureMode,
-    workCounterMode: CFG.rules.defaultWorkCounterMode,
-    grayBoxMode: CFG.rules.defaultGrayBoxMode,
-    viewMode: CFG.rules.defaultViewMode,
-    annualLeaveBalance: CFG.defaults.annualLeaveBalance,
-    ctAllocations: {}, // { [cycleNumber]: days }
-    selectedDateKey: null
-  };
+  function createDefaultState() {
+    return {
+      employeeName: CFG.defaults.employeeName,
+      employeeNik: CFG.defaults.employeeNik,
+      employeeRole: CFG.defaults.employeeRole,
+      joinDate: CFG.defaults.joinDate,
+      startDate: CFG.defaults.startDate,
+      targetHomeDays: Math.max(CFG.rules.minHomeLeaveDays, CFG.rules.defaultHomeLeaveDays),
+      offDay: CFG.rules.defaultOffDay,
+      departureMode: CFG.rules.defaultDepartureMode,
+      workCounterMode: CFG.rules.defaultWorkCounterMode,
+      grayBoxMode: CFG.rules.defaultGrayBoxMode,
+      viewMode: CFG.rules.defaultViewMode,
+      showHolidays: CFG.rules.defaultShowHolidays !== false,
+      annualLeaveBalance: CFG.defaults.annualLeaveBalance,
+      initialTcBalance: CFG.defaults.initialTcBalance || 0,
+      ctAllocations: {},   // { [cycle]: days }
+      cycleHomeDays: {},   // { [cycle]: targetHomeDaysOverride }
+      cycleSaveTc: {},     // { [cycle]: extraTcToCarryOver }
+      manualOverrides: {}, // { [isoDate]: { type: 'sick'|'permit'|'duty'|'alpha'|'customOff', note: '' } }
+      selectedDateKey: null
+    };
+  }
 
+  const state = createDefaultState();
   let lastSimulation = null;
 
-  // ---------- DATE UTILITIES (LOCAL TIMEZONE SAFE) ----------
+  // ---------- UTILITIES ----------
   function parseISODate(str) {
     if (!str || typeof str !== 'string') return null;
-    const parts = str.split('-').map(Number);
-    if (parts.length !== 3 || parts.some(isNaN)) return null;
-    const d = new Date(parts[0], parts[1] - 1, parts[2]);
-    if (d.getFullYear() !== parts[0] || d.getMonth() !== parts[1] - 1 || d.getDate() !== parts[2]) {
-      return null;
-    }
-    return d;
+    const p = str.split('-').map(Number);
+    if (p.length !== 3 || p.some(isNaN)) return null;
+    const d = new Date(p[0], p[1] - 1, p[2]);
+    return d.getFullYear() === p[0] && d.getMonth() === p[1] - 1 && d.getDate() === p[2] ? d : null;
   }
 
   function toISODate(d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   function addDays(d, n) {
@@ -65,6 +68,12 @@
     return new Date(year, monthIndex + 1, 0).getDate();
   }
 
+  function clampInt(val, min, max, fallback) {
+    const n = Math.floor(Number(val));
+    if (isNaN(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+
   function formatDateID(d, shortMonth) {
     if (!d) return '-';
     const months = shortMonth ? CFG.labels.monthNamesShort : CFG.labels.monthNamesFull;
@@ -73,8 +82,7 @@
 
   function formatDateFullID(d) {
     if (!d) return '-';
-    const dayName = CFG.labels.dayNamesFull[d.getDay()];
-    return `${dayName}, ${formatDateID(d, false)}`;
+    return `${CFG.labels.dayNamesFull[d.getDay()]}, ${formatDateID(d, false)}`;
   }
 
   function getAnnualLeaveEligibleDate(joinDateObj) {
@@ -83,8 +91,11 @@
     const targetMonthIndex = joinDateObj.getMonth() + months;
     const y = joinDateObj.getFullYear() + Math.floor(targetMonthIndex / 12);
     const m = targetMonthIndex % 12;
-    const maxD = daysInMonth(y, m);
-    return new Date(y, m, Math.min(joinDateObj.getDate(), maxD));
+    return new Date(y, m, Math.min(joinDateObj.getDate(), daysInMonth(y, m)));
+  }
+
+  function getHoliday(iso) {
+    return (CFG.holidays && CFG.holidays[iso]) ? CFG.holidays[iso] : null;
   }
 
   function formatTemplate(tpl, vars) {
@@ -95,13 +106,10 @@
 
   function escapeHtml(str) {
     return String(str ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  // ---------- SYNC COLORS FROM CONFIG.JS TO CSS VARIABLES ----------
   function injectConfigTheme() {
     const root = document.documentElement;
     Object.entries(CFG.colors).forEach(([key, val]) => {
@@ -112,43 +120,57 @@
     });
   }
 
-  // ---------- CORE SIMULATION ENGINE ----------
+  // ---------- CORE SIMULATION ENGINE (v2.0) ----------
   function runSimulation() {
     const startDate = parseISODate(state.startDate) || parseISODate(CFG.defaults.startDate) || new Date();
     const joinDate = parseISODate(state.joinDate);
     const ctEligibleDate = getAnnualLeaveEligibleDate(joinDate);
 
-    // Determine 12-month window
+    // 12-month window
     const months = [];
     if (state.viewMode === 'rolling_12') {
-      const startY = startDate.getFullYear();
-      const startM = startDate.getMonth();
       for (let i = 0; i < 12; i++) {
-        const d = new Date(startY, startM + i, 1);
+        const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
         months.push({ year: d.getFullYear(), month: d.getMonth() });
       }
     } else {
       const y = startDate.getFullYear();
-      for (let m = 0; m < 12; m++) {
-        months.push({ year: y, month: m });
-      }
+      for (let m = 0; m < 12; m++) months.push({ year: y, month: m });
     }
 
     const windowStart = new Date(months[0].year, months[0].month, 1);
     const lastM = months[months.length - 1];
     const windowEnd = new Date(lastM.year, lastM.month, daysInMonth(lastM.year, lastM.month));
 
-    // Rules from config
     const minWorkPerWeek = Math.max(1, Number(CFG.rules.workDaysPerWeek) || 5);
     const minHomeDays = Math.max(2, Number(CFG.rules.minHomeLeaveDays) || 9);
-    const targetHomeDays = Math.max(minHomeDays, Number(state.targetHomeDays) || minHomeDays);
-    const weeksTarget = targetHomeDays - 1; // e.g. 9 days = 1 OFF + 8 TC -> 8 weeks
+    const maxHomeDays = Math.max(minHomeDays, Number(CFG.rules.maxHomeLeaveDays) || 30);
+    const globalTargetHome = clampInt(state.targetHomeDays, minHomeDays, maxHomeDays, minHomeDays);
     const ticketQuota = Math.max(1, Number(CFG.rules.companyTicketQuotaPerYear) || 3);
 
-    // Track remaining CT balance across cycles
-    let remainingCTBalance = Math.max(0, Math.floor(Number(state.annualLeaveBalance) || 0));
+    let remainingCTBalance = clampInt(state.annualLeaveBalance, 0, 60, 0);
+    let tcBank = clampInt(state.initialTcBalance, 0, 30, 0);
 
-    // Simulation state machine
+    // Helper: compute target TC for active cycle (supports custom duration + carry-over)
+    function getCycleTargets(cycleNum, carryIn) {
+      const hasCustomDays = state.cycleHomeDays[cycleNum] !== undefined;
+      const targetHome = hasCustomDays
+        ? clampInt(state.cycleHomeDays[cycleNum], minHomeDays, maxHomeDays, globalTargetHome)
+        : globalTargetHome;
+      const saveTcReq = clampInt(state.cycleSaveTc[cycleNum] || 0, 0, 20, 0);
+
+      if (state.departureMode === 'leave_after_day5') {
+        const cNeeded = Math.max(1, targetHome - 2);
+        const tcGoalBeforeDepart = Math.max(0, cNeeded + saveTcReq - carryIn);
+        return { targetHome, hasCustomDays, saveTcReq, cNeeded, tcGoalBeforeDepart, tcGoalWork6: tcGoalBeforeDepart + 1 };
+      } else {
+        const cNeeded = Math.max(1, targetHome - 1);
+        const tcGoalWork6 = Math.max(1, cNeeded + saveTcReq - carryIn);
+        return { targetHome, hasCustomDays, saveTcReq, cNeeded, tcGoalBeforeDepart: tcGoalWork6 - 1, tcGoalWork6 };
+      }
+    }
+
+    // State machine variables
     let phase = 'SITE';
     let cycle = 1;
     let siteDayCounter = 0;
@@ -160,28 +182,32 @@
     let currentSiteStart = null;
     let currentCycleObj = null;
 
-    const cellMap = new Map(); // isoDate -> cell object
+    const cellMap = new Map();
     const cycles = [];
     const ticketCountByYear = {};
 
-    function registerCycleLeave(departDate, firstOffDate, earnedTcCount, departedAfterDay5) {
+    function registerCycleLeave(departDate, earnedTcCount, departedAfterDay5) {
+      const cfgTgt = getCycleTargets(cycle, tcBank);
+      const tcCarryIn = tcBank;
+      const totalTcAvailable = tcCarryIn + earnedTcCount;
+      const cUsed = Math.min(totalTcAvailable, cfgTgt.cNeeded);
+      const tcCarryOut = Math.max(0, totalTcAvailable - cUsed);
+      tcBank = tcCarryOut; // Carry forward to next cycle!
+
       const leaveYear = departDate.getFullYear();
       const quotaBucket = CFG.rules.ticketQuotaResetMode === 'simulation_window' ? 'ALL' : String(leaveYear);
       ticketCountByYear[quotaBucket] = (ticketCountByYear[quotaBucket] || 0) + 1;
       const ticketSeq = ticketCountByYear[quotaBucket];
       const isCompanyTicket = ticketSeq <= ticketQuota;
 
-      // Check CT eligibility at leave start
       const isCtEligible = Boolean(ctEligibleDate && departDate >= ctEligibleDate);
       const requestedCT = Math.max(0, Math.floor(Number(state.ctAllocations[cycle]) || 0));
       const grantedCT = isCtEligible ? Math.min(requestedCT, remainingCTBalance) : 0;
       remainingCTBalance -= grantedCT;
 
       const queue = [];
-      // Note: If departedAfterDay5, departDate itself is already pushed as offDepart,
-      // and queue begins on firstOffDate (which is Day 7 OFF).
       queue.push({ kind: 'offLeave', code: CFG.codes.off, cycle });
-      for (let i = 1; i <= earnedTcCount; i++) {
+      for (let i = 1; i <= cUsed; i++) {
         queue.push({ kind: 'leave', code: `${CFG.codes.leave}${i}`, cycle, leaveIndex: i });
       }
       for (let i = 1; i <= grantedCT; i++) {
@@ -189,9 +215,17 @@
       }
 
       const offDaysCount = departedAfterDay5 ? 2 : 1;
-      const totalHomeDays = offDaysCount + earnedTcCount + grantedCT;
+      const totalHomeDays = offDaysCount + cUsed + grantedCT;
       const leaveEndDate = addDays(departDate, totalHomeDays - 1);
       const returnSiteDate = addDays(leaveEndDate, state.grayBoxMode === 'trv' ? 2 : 1);
+
+      // Scan national/joint holidays overlapping this leave period
+      const holidaysInLeave = [];
+      for (let i = 0; i < totalHomeDays; i++) {
+        const d = addDays(departDate, i);
+        const h = getHoliday(toISODate(d));
+        if (h) holidaysInLeave.push({ iso: toISODate(d), date: d, name: h.name, type: h.type });
+      }
 
       const cycleRecord = {
         cycle,
@@ -201,12 +235,20 @@
         leaveEndDate,
         returnSiteDate,
         offDaysCount,
-        cDaysCount: earnedTcCount,
+        cDaysCount: cUsed,
         ctDaysCount: grantedCT,
+        baseHomeDays: offDaysCount + cUsed,
         totalHomeDays,
+        targetHomeDays: cfgTgt.targetHome,
+        hasCustomDays: cfgTgt.hasCustomDays,
+        saveTcRequested: cfgTgt.saveTcReq,
+        tcCarryIn,
+        tcEarnedThisCycle: earnedTcCount,
+        tcCarryOut,
         departedAfterDay5,
         isCtEligible,
         ctEligibleDate,
+        holidaysInLeave,
         ticketSeq,
         ticketQuota,
         ticketYear: leaveYear,
@@ -220,53 +262,60 @@
       return queue;
     }
 
-    // Iterate day by day from min(windowStart, startDate) up to windowEnd
+    function resetForNextCycle() {
+      phase = 'SITE';
+      cycle += 1;
+      siteDayCounter = 0;
+      workDayCounter = 0;
+      tcEarned = 0;
+      weekWorkDays = 0;
+      autoWeekDay = 0;
+      currentSiteStart = null;
+      currentCycleObj = null;
+    }
+
+    function getOverride(iso) {
+      const ov = state.manualOverrides && state.manualOverrides[iso];
+      if (!ov || !CFG.overrideTypes[ov.type]) return null;
+      return { type: ov.type, note: ov.note || '', spec: CFG.overrideTypes[ov.type] };
+    }
+
+    // Iterate day by day
     let cur = startDate < windowStart ? new Date(startDate) : new Date(windowStart);
 
-    // Pre-start fill if windowStart < startDate
     while (cur < startDate && cur <= windowEnd) {
       const iso = toISODate(cur);
       cellMap.set(iso, {
-        date: new Date(cur),
-        iso,
-        kind: 'preStart',
-        code: CFG.codes.preStart,
-        cycle: null,
-        weekWork: 0
+        date: new Date(cur), iso, kind: 'preStart', code: CFG.codes.preStart,
+        cycle: null, weekWork: 0, holiday: getHoliday(iso), tcBankSnap: tcBank
       });
       cur = addDays(cur, 1);
     }
 
-    // Main simulation loop from startDate through windowEnd
     while (cur <= windowEnd) {
       const iso = toISODate(cur);
-      const dow = cur.getDay(); // 0=Sun..6=Sat
+      const dow = cur.getDay();
+      const holiday = getHoliday(iso);
+      const ov = getOverride(iso);
 
       if (phase === 'LEAVE') {
         const item = leaveQueue.shift();
         cellMap.set(iso, {
-          date: new Date(cur),
-          iso,
-          kind: item.kind,
-          code: item.code,
+          date: new Date(cur), iso,
+          kind: ov ? ov.type : item.kind,
+          code: ov ? ov.spec.code : item.code,
+          isOverride: Boolean(ov),
+          overrideNote: ov ? ov.note : '',
+          originalCode: ov ? item.code : null,
           cycle: item.cycle,
           cycleInfo: currentCycleObj,
-          weekWork: 0
+          weekWork: 0,
+          holiday,
+          tcBankSnap: tcBank
         });
         if (leaveQueue.length === 0) {
-          if (state.grayBoxMode === 'trv') {
-            phase = 'POST_LEAVE';
-          } else {
-            phase = 'SITE';
-            cycle += 1;
-            siteDayCounter = 0;
-            workDayCounter = 0;
-            tcEarned = 0;
-            weekWorkDays = 0;
-            autoWeekDay = 0;
-            currentSiteStart = null;
-            currentCycleObj = null;
-          }
+          if (state.grayBoxMode === 'trv') phase = 'POST_LEAVE';
+          else resetForNextCycle();
         }
         cur = addDays(cur, 1);
         continue;
@@ -274,184 +323,163 @@
 
       if (phase === 'POST_LEAVE') {
         cellMap.set(iso, {
-          date: new Date(cur),
-          iso,
-          kind: 'postLeaveGap',
-          code: CFG.codes.postLeaveGap,
+          date: new Date(cur), iso,
+          kind: ov ? ov.type : 'postLeaveGap',
+          code: ov ? ov.spec.code : CFG.codes.postLeaveGap,
+          isOverride: Boolean(ov),
+          overrideNote: ov ? ov.note : '',
           cycle,
           cycleInfo: currentCycleObj,
-          weekWork: 0
+          weekWork: 0,
+          holiday,
+          tcBankSnap: tcBank
         });
-        phase = 'SITE';
-        cycle += 1;
-        siteDayCounter = 0;
-        workDayCounter = 0;
-        tcEarned = 0;
-        weekWorkDays = 0;
-        autoWeekDay = 0;
-        currentSiteStart = null;
-        currentCycleObj = null;
+        resetForNextCycle();
         cur = addDays(cur, 1);
         continue;
       }
 
       // PHASE === 'SITE'
-      if (state.offDay === 'auto') {
-        autoWeekDay += 1;
-        if (autoWeekDay <= minWorkPerWeek) {
-          if (!currentSiteStart) currentSiteStart = new Date(cur);
+      const tgt = getCycleTargets(cycle, tcBank);
+
+      // Shared handler for Day 6 (TC Candidate Day)
+      function handleTcCandidateDay() {
+        if (ov && !ov.spec.countsAsWork) {
           siteDayCounter += 1;
-          workDayCounter += 1;
-          weekWorkDays += 1;
-          const num = state.workCounterMode === 'site_day' ? siteDayCounter : workDayCounter;
           cellMap.set(iso, {
-            date: new Date(cur),
-            iso,
-            kind: 'work',
-            code: `${CFG.codes.work}${num}`,
-            cycle,
-            weekWork: weekWorkDays
+            date: new Date(cur), iso, kind: ov.type, code: ov.spec.code,
+            isOverride: true, overrideNote: ov.note, cycle, weekWork: weekWorkDays,
+            holiday, tcBankSnap: tcBank + tcEarned
           });
-        } else if (autoWeekDay === minWorkPerWeek + 1) {
-          const isFinalWeek = tcEarned === weeksTarget - 1;
-          if (isFinalWeek && state.departureMode === 'leave_after_day5') {
-            leaveQueue = registerCycleLeave(new Date(cur), addDays(cur, 1), tcEarned, true);
+          return;
+        }
+
+        if (weekWorkDays >= minWorkPerWeek) {
+          const isFinalForAfter5 = tcEarned === tgt.tcGoalBeforeDepart;
+          if (!ov && isFinalForAfter5 && state.departureMode === 'leave_after_day5') {
+            leaveQueue = registerCycleLeave(new Date(cur), tcEarned, true);
             cellMap.set(iso, {
-              date: new Date(cur),
-              iso,
-              kind: 'offDepart',
-              code: CFG.codes.off,
-              cycle,
-              cycleInfo: currentCycleObj,
-              weekWork: weekWorkDays
+              date: new Date(cur), iso, kind: 'offDepart', code: CFG.codes.off,
+              cycle, cycleInfo: currentCycleObj, weekWork: weekWorkDays,
+              holiday, tcBankSnap: tcBank
             });
             phase = 'LEAVE';
           } else {
             siteDayCounter += 1;
             tcEarned += 1;
-            const isLastTc = tcEarned === weeksTarget;
+            const isLastTc = (state.departureMode === 'work_day6' && tcEarned >= tgt.tcGoalWork6)
+              || (ov && state.departureMode === 'leave_after_day5' && tcEarned >= tgt.tcGoalWork6);
             if (isLastTc) {
-              leaveQueue = registerCycleLeave(addDays(cur, 1), addDays(cur, 1), tcEarned, false);
+              leaveQueue = registerCycleLeave(addDays(cur, 1), tcEarned, false);
               phase = 'LEAVE';
             }
             cellMap.set(iso, {
-              date: new Date(cur),
-              iso,
-              kind: isLastTc ? 'tcLast' : 'tc',
-              code: `${CFG.codes.tc}${tcEarned}`,
+              date: new Date(cur), iso,
+              kind: ov ? ov.type : (isLastTc ? 'tcLast' : 'tc'),
+              code: ov ? ov.spec.code : `${CFG.codes.tc}${tcEarned}`,
+              isOverride: Boolean(ov),
+              overrideNote: ov ? ov.note : '',
+              earnedTcFromOverride: Boolean(ov),
               cycle,
               cycleInfo: isLastTc ? currentCycleObj : null,
-              weekWork: weekWorkDays
+              weekWork: weekWorkDays,
+              holiday,
+              tcBankSnap: isLastTc ? tcBank : (tcBank + tcEarned)
             });
           }
         } else {
-          // Day 7 (weekly OFF at site)
+          // Partial week (< 5 work days) -> regular work day (or override), NO TC!
+          if (!currentSiteStart) currentSiteStart = new Date(cur);
+          const prevW = weekWorkDays;
+          siteDayCounter += 1;
+          if (!ov || ov.spec.countsAsWork) {
+            workDayCounter += 1;
+            weekWorkDays += 1;
+          }
+          const num = state.workCounterMode === 'site_day' ? siteDayCounter : workDayCounter;
+          cellMap.set(iso, {
+            date: new Date(cur), iso,
+            kind: ov ? ov.type : 'workPartial',
+            code: ov ? ov.spec.code : `${CFG.codes.work}${num}`,
+            isOverride: Boolean(ov),
+            overrideNote: ov ? ov.note : '',
+            cycle, weekWork: prevW, holiday, tcBankSnap: tcBank + tcEarned
+          });
+        }
+      }
+
+      // Shared handler for regular work day (Days 1..5)
+      function handleRegularWorkDay() {
+        if (!currentSiteStart) currentSiteStart = new Date(cur);
+        siteDayCounter += 1;
+        if (ov) {
+          if (ov.spec.countsAsWork) {
+            workDayCounter += 1;
+            weekWorkDays += 1;
+          }
+          cellMap.set(iso, {
+            date: new Date(cur), iso, kind: ov.type, code: ov.spec.code,
+            isOverride: true, overrideNote: ov.note, cycle, weekWork: weekWorkDays,
+            holiday, tcBankSnap: tcBank + tcEarned
+          });
+        } else {
+          workDayCounter += 1;
+          weekWorkDays += 1;
+          const num = state.workCounterMode === 'site_day' ? siteDayCounter : workDayCounter;
+          cellMap.set(iso, {
+            date: new Date(cur), iso, kind: 'work', code: `${CFG.codes.work}${num}`,
+            cycle, weekWork: weekWorkDays, holiday, tcBankSnap: tcBank + tcEarned
+          });
+        }
+      }
+
+      if (state.offDay === 'auto') {
+        autoWeekDay += 1;
+        if (autoWeekDay <= minWorkPerWeek) {
+          handleRegularWorkDay();
+        } else if (autoWeekDay === minWorkPerWeek + 1) {
+          handleTcCandidateDay();
+        } else {
           siteDayCounter += 1;
           cellMap.set(iso, {
-            date: new Date(cur),
-            iso,
-            kind: 'offSite',
-            code: CFG.codes.off,
-            cycle,
-            weekWork: weekWorkDays
+            date: new Date(cur), iso,
+            kind: ov ? ov.type : 'offSite',
+            code: ov ? ov.spec.code : CFG.codes.off,
+            isOverride: Boolean(ov),
+            overrideNote: ov ? ov.note : '',
+            cycle, weekWork: weekWorkDays, holiday, tcBankSnap: tcBank + tcEarned
           });
           autoWeekDay = 0;
           weekWorkDays = 0;
         }
       } else {
-        // FIXED OFF DAY MODE (0..6) with SOP: Must reach minWorkPerWeek (5) work days before TC!
         const fixedOffDow = Number(state.offDay);
         const tcCandidateDow = (fixedOffDow + 6) % 7;
-
         if (dow === fixedOffDow) {
           if (siteDayCounter > 0) siteDayCounter += 1;
           cellMap.set(iso, {
-            date: new Date(cur),
-            iso,
-            kind: 'offSite',
-            code: CFG.codes.off,
-            cycle,
-            weekWork: weekWorkDays
+            date: new Date(cur), iso,
+            kind: ov ? ov.type : 'offSite',
+            code: ov ? ov.spec.code : CFG.codes.off,
+            isOverride: Boolean(ov),
+            overrideNote: ov ? ov.note : '',
+            cycle, weekWork: weekWorkDays, holiday, tcBankSnap: tcBank + tcEarned
           });
           weekWorkDays = 0;
         } else if (dow === tcCandidateDow) {
-          if (weekWorkDays >= minWorkPerWeek) {
-            const isFinalWeek = tcEarned === weeksTarget - 1;
-            if (isFinalWeek && state.departureMode === 'leave_after_day5') {
-              leaveQueue = registerCycleLeave(new Date(cur), addDays(cur, 1), tcEarned, true);
-              cellMap.set(iso, {
-                date: new Date(cur),
-                iso,
-                kind: 'offDepart',
-                code: CFG.codes.off,
-                cycle,
-                cycleInfo: currentCycleObj,
-                weekWork: weekWorkDays
-              });
-              phase = 'LEAVE';
-            } else {
-              siteDayCounter += 1;
-              tcEarned += 1;
-              const isLastTc = tcEarned === weeksTarget;
-              if (isLastTc) {
-                leaveQueue = registerCycleLeave(addDays(cur, 1), addDays(cur, 1), tcEarned, false);
-                phase = 'LEAVE';
-              }
-              cellMap.set(iso, {
-                date: new Date(cur),
-                iso,
-                kind: isLastTc ? 'tcLast' : 'tc',
-                code: `${CFG.codes.tc}${tcEarned}`,
-                cycle,
-                cycleInfo: isLastTc ? currentCycleObj : null,
-                weekWork: weekWorkDays
-              });
-            }
-          } else {
-            // Partial week (< 5 work days) -> regular work day, NOT TC
-            if (!currentSiteStart) currentSiteStart = new Date(cur);
-            const prevWeekWork = weekWorkDays;
-            siteDayCounter += 1;
-            workDayCounter += 1;
-            weekWorkDays += 1;
-            const num = state.workCounterMode === 'site_day' ? siteDayCounter : workDayCounter;
-            cellMap.set(iso, {
-              date: new Date(cur),
-              iso,
-              kind: 'workPartial',
-              code: `${CFG.codes.work}${num}`,
-              cycle,
-              weekWork: prevWeekWork
-            });
-          }
+          handleTcCandidateDay();
         } else {
-          if (!currentSiteStart) currentSiteStart = new Date(cur);
-          siteDayCounter += 1;
-          workDayCounter += 1;
-          weekWorkDays += 1;
-          const num = state.workCounterMode === 'site_day' ? siteDayCounter : workDayCounter;
-          cellMap.set(iso, {
-            date: new Date(cur),
-            iso,
-            kind: 'work',
-            code: `${CFG.codes.work}${num}`,
-            cycle,
-            weekWork: weekWorkDays
-          });
+          handleRegularWorkDay();
         }
       }
 
       cur = addDays(cur, 1);
     }
 
-    // Aggregate totals within visible 12-month window
+    // Aggregate totals within 12-month window
     const totals = {
-      work: 0,
-      tc: 0,
-      off: 0,
-      leave: 0,
-      annualLeave: 0,
-      postLeaveGap: 0
+      work: 0, tc: 0, off: 0, leave: 0, annualLeave: 0, postLeaveGap: 0,
+      overrides: 0, holidaysOnWork: 0
     };
 
     const monthRows = months.map(({ year, month }) => {
@@ -466,10 +494,13 @@
         }
         const dt = new Date(year, month, d);
         const iso = toISODate(dt);
-        const cell = cellMap.get(iso) || { date: dt, iso, kind: 'preStart', code: CFG.codes.preStart };
+        const cell = cellMap.get(iso) || {
+          date: dt, iso, kind: 'preStart', code: CFG.codes.preStart, holiday: getHoliday(iso)
+        };
         cells.push(cell);
 
-        if (cell.kind === 'work' || cell.kind === 'workPartial') {
+        if (cell.isOverride) totals.overrides++;
+        if (cell.kind === 'work' || cell.kind === 'workPartial' || cell.kind === 'duty') {
           rowStats.work++; totals.work++;
         } else if (cell.kind === 'tc' || cell.kind === 'tcLast') {
           rowStats.tc++; totals.tc++;
@@ -477,25 +508,25 @@
           rowStats.leave++; totals.leave++;
         } else if (cell.kind === 'annualLeave') {
           rowStats.annualLeave++; totals.annualLeave++;
-        } else if (cell.kind === 'offSite' || cell.kind === 'offDepart' || cell.kind === 'offLeave') {
+        } else if (cell.kind === 'offSite' || cell.kind === 'offDepart' || cell.kind === 'offLeave' || cell.kind === 'customOff') {
           totals.off++;
         } else if (cell.kind === 'postLeaveGap') {
           totals.postLeaveGap++;
         }
+
+        if (cell.holiday && cell.holiday.type === 'national' &&
+          ['work', 'workPartial', 'tc', 'tcLast', 'duty'].includes(cell.kind)) {
+          totals.holidaysOnWork++;
+        }
       }
 
-      return {
-        year,
-        month,
-        label: `${CFG.labels.monthNamesShort[month]} ${year}`,
-        cells,
-        stats: rowStats
-      };
+      return { year, month, label: `${CFG.labels.monthNamesShort[month]} ${year}`, cells, stats: rowStats };
     });
 
     const totalCTUsed = cycles.reduce((sum, c) => sum + c.ctDaysCount, 0);
     const companyTicketsUsed = cycles.filter(c => c.isCompanyTicket).length;
     const selfTicketsUsed = cycles.filter(c => !c.isCompanyTicket).length;
+    const endingTcBank = phase === 'SITE' ? (tcBank + tcEarned) : tcBank;
 
     return {
       months: monthRows,
@@ -507,25 +538,23 @@
       ctEligibleDate,
       totalCTUsed,
       remainingCTBalance,
+      initialTcBalance: clampInt(state.initialTcBalance, 0, 30, 0),
+      endingTcBank,
       companyTicketsUsed,
       selfTicketsUsed,
-      targetHomeDays,
-      weeksTarget
+      targetHomeDays: globalTargetHome
     };
   }
 
-  // ---------- RENDER FUNCTIONS ----------
+  // ---------- RENDERING ----------
   function renderStaticBrand() {
     document.title = CFG.app.title;
     const elTitle = document.getElementById('appTitle');
-    if (elTitle) {
-      elTitle.innerHTML = `${escapeHtml(CFG.app.title)} <span class="version-pill">v${escapeHtml(CFG.app.version)}</span>`;
-    }
+    if (elTitle) elTitle.innerHTML = `${escapeHtml(CFG.app.title)} <span class="version-pill">v${escapeHtml(CFG.app.version)}</span>`;
     setText('appSubtitle', `${CFG.app.companyName} — ${CFG.app.subtitle}`);
     setText('printCompanyTitle', `${CFG.app.companyName} — Jadwal Simulasi Roster & Cuti`);
     setText('printSubtitle', CFG.app.subtitle);
 
-    // Populate off-day dropdown dynamically
     const offSelect = document.getElementById('inputOffDay');
     if (offSelect) {
       offSelect.innerHTML = `<option value="auto">Otomatis (Ikut Siklus 5:2 dari ${escapeHtml(CFG.codes.work)}1)</option>`;
@@ -537,76 +566,47 @@
       });
     }
 
-    // Populate counter mode select
-    const counterSelect = document.getElementById('inputCounterMode');
-    if (counterSelect) {
-      counterSelect.innerHTML = '';
-      Object.entries(CFG.labels.workCounterModes).forEach(([k, label]) => {
+    const fillSelect = (id, entries, transform) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = '';
+      entries.forEach(([k, label]) => {
         const opt = document.createElement('option');
         opt.value = k;
-        opt.textContent = label.replace(/X/g, CFG.codes.work).replace(/TC/g, CFG.codes.tc).replace(/OFF/g, CFG.codes.off);
-        counterSelect.appendChild(opt);
+        opt.textContent = transform ? transform(label) : label;
+        el.appendChild(opt);
       });
-    }
+    };
 
-    // Populate gray box select
-    const graySelect = document.getElementById('inputGrayMode');
-    if (graySelect) {
-      graySelect.innerHTML = '';
-      Object.entries(CFG.labels.grayBoxModes).forEach(([k, label]) => {
-        const opt = document.createElement('option');
-        opt.value = k;
-        opt.textContent = label
-          .replace(/TRV\?/g, CFG.codes.postLeaveGap || 'TRV?')
-          .replace(/X1/g, `${CFG.codes.work}1`);
-        graySelect.appendChild(opt);
-      });
-    }
+    fillSelect('inputCounterMode', Object.entries(CFG.labels.workCounterModes),
+      l => l.replace(/X/g, CFG.codes.work).replace(/TC/g, CFG.codes.tc).replace(/OFF/g, CFG.codes.off));
+    fillSelect('inputGrayMode', Object.entries(CFG.labels.grayBoxModes),
+      l => l.replace(/TRV\?/g, CFG.codes.postLeaveGap || 'TRV?').replace(/X1/g, `${CFG.codes.work}1`));
+    fillSelect('inputViewMode', Object.entries(CFG.labels.viewModes),
+      l => l.replace(/X1/g, `${CFG.codes.work}1`));
 
-    // Populate view mode select
-    const viewSelect = document.getElementById('inputViewMode');
-    if (viewSelect) {
-      viewSelect.innerHTML = '';
-      Object.entries(CFG.labels.viewModes).forEach(([k, label]) => {
-        const opt = document.createElement('option');
-        opt.value = k;
-        opt.textContent = label.replace(/X1/g, `${CFG.codes.work}1`);
-        viewSelect.appendChild(opt);
-      });
-    }
-
-    // Populate departure radio labels
-    setText('labelDepartWork6', CFG.labels.departureModes.work_day6
-      .replace(/TC/g, CFG.codes.tc).replace(/\bC\b/g, CFG.codes.leave));
-    setText('labelDepartAfter5', CFG.labels.departureModes.leave_after_day5
-      .replace(/OFF/g, CFG.codes.off).replace(/\bC\b/g, CFG.codes.leave));
-
-    // Dynamic labels referencing codes
+    setText('labelDepartWork6', CFG.labels.departureModes.work_day6.replace(/TC/g, CFG.codes.tc).replace(/\bC\b/g, CFG.codes.leave));
+    setText('labelDepartAfter5', CFG.labels.departureModes.leave_after_day5.replace(/OFF/g, CFG.codes.off).replace(/\bC\b/g, CFG.codes.leave));
     setText('labelStartX1', `Mulai Kerja (${CFG.codes.work}1) di Site`);
-    setText('labelMinDaysHint', `Kunci minimal SOP: ${CFG.rules.minHomeLeaveDays} hari (1 ${CFG.codes.off} + ${CFG.rules.minHomeLeaveDays - 1} ${CFG.codes.leave}).`);
+    setText('labelMinDaysHint', `Kunci minimal SOP: ${CFG.rules.minHomeLeaveDays} hari. Tiap periode bisa di-custom di tabel bawah.`);
 
-    // Render preset buttons from config
     const presetContainer = document.getElementById('presetRow');
     if (presetContainer) {
       presetContainer.innerHTML = '';
-      CFG.rules.homeLeavePresets
-        .filter(n => n >= CFG.rules.minHomeLeaveDays)
-        .forEach(days => {
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'preset-btn';
-          btn.dataset.days = String(days);
-          btn.textContent = `${days} Hari`;
-          btn.addEventListener('click', () => {
-            state.targetHomeDays = days;
-            document.getElementById('inputHomeDays').value = String(days);
-            saveAndRender();
-          });
-          presetContainer.appendChild(btn);
+      CFG.rules.homeLeavePresets.filter(n => n >= CFG.rules.minHomeLeaveDays).forEach(days => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'preset-btn';
+        btn.dataset.days = String(days);
+        btn.textContent = `${days} Hari`;
+        btn.addEventListener('click', () => {
+          state.targetHomeDays = days;
+          saveAndRender();
         });
+        presetContainer.appendChild(btn);
+      });
     }
 
-    // Render print signatures from config
     const sigGrid = document.getElementById('printSignatures');
     if (sigGrid) {
       sigGrid.innerHTML = CFG.signatures.map(s => `
@@ -622,31 +622,30 @@
   function renderLegend() {
     const container = document.getElementById('legendBar');
     if (!container) return;
-
+    const c = CFG.codes;
     const items = [
-      { key: 'work', sample: `${CFG.codes.work}1` },
-      { key: 'workPartial', sample: `${CFG.codes.work}*` },
-      { key: 'tc', sample: `${CFG.codes.tc}1` },
-      { key: 'tcLast', sample: `${CFG.codes.tc}n` },
-      { key: 'offSite', sample: CFG.codes.off },
-      { key: 'offDepart', sample: CFG.codes.off },
-      { key: 'offLeave', sample: CFG.codes.off },
-      { key: 'leave', sample: `${CFG.codes.leave}1` },
-      { key: 'annualLeave', sample: `${CFG.codes.annualLeave}1` },
-      { key: 'postLeaveGap', sample: CFG.codes.postLeaveGap || 'GAP' }
+      { key: 'work', sample: `${c.work}1` },
+      { key: 'workPartial', sample: `${c.work}*` },
+      { key: 'tc', sample: `${c.tc}1` },
+      { key: 'tcLast', sample: `${c.tc}n` },
+      { key: 'offSite', sample: c.off },
+      { key: 'offLeave', sample: c.off },
+      { key: 'leave', sample: `${c.leave}1` },
+      { key: 'annualLeave', sample: `${c.annualLeave}1` },
+      { key: 'postLeaveGap', sample: c.postLeaveGap || 'GAP' },
+      { key: 'sick', sample: 'S' },
+      { key: 'permit', sample: 'I' },
+      { key: 'duty', sample: 'DL' }
     ];
 
     let html = `<span class="legend-title">Legenda:</span>`;
     items.forEach(it => {
-      const c = CFG.colors[it.key];
-      if (!c) return;
-      html += `
-        <span class="legend-item">
-          <span class="legend-swatch" style="background:${c.bg};color:${c.text};border-color:${c.border};">${escapeHtml(it.sample)}</span>
-          <span>${escapeHtml(c.label)}</span>
-        </span>
-      `;
+      const col = CFG.colors[it.key];
+      if (!col) return;
+      html += `<span class="legend-item"><span class="legend-swatch" style="background:${col.bg};color:${col.text};border-color:${col.border};">${escapeHtml(it.sample)}</span><span>${escapeHtml(col.label)}</span></span>`;
     });
+    html += `<span class="legend-item"><span class="legend-swatch" style="background:#FEF2F2;color:#DC2626;border-color:#FECACA;">◥</span><span>Libur Nasional</span></span>`;
+    html += `<span class="legend-item"><span class="legend-swatch" style="background:#FFFBEB;color:#D97706;border-color:#FDE68A;">◥</span><span>Cuti Bersama</span></span>`;
     container.innerHTML = html;
   }
 
@@ -657,25 +656,21 @@
     setVal('inputJoinDate', state.joinDate);
     setVal('inputStartDate', state.startDate);
     setVal('inputHomeDays', state.targetHomeDays);
-    const homeInput = document.getElementById('inputHomeDays');
-    if (homeInput) {
-      homeInput.min = String(CFG.rules.minHomeLeaveDays);
-      homeInput.max = String(CFG.rules.maxHomeLeaveDays);
-    }
     setVal('inputOffDay', String(state.offDay));
     setVal('inputCounterMode', state.workCounterMode);
     setVal('inputGrayMode', state.grayBoxMode);
     setVal('inputViewMode', state.viewMode);
     setVal('inputCtBalance', state.annualLeaveBalance);
+    setVal('inputInitialTc', state.initialTcBalance);
 
-    // Sync radio buttons
+    const holCb = document.getElementById('inputShowHolidays');
+    if (holCb) holCb.checked = Boolean(state.showHolidays);
+
     document.querySelectorAll('input[name="departureMode"]').forEach(r => {
       r.checked = r.value === state.departureMode;
       const card = r.closest('.radio-card');
       if (card) card.classList.toggle('selected', r.checked);
     });
-
-    // Sync preset active state
     document.querySelectorAll('.preset-btn').forEach(btn => {
       btn.classList.toggle('active', Number(btn.dataset.days) === Number(state.targetHomeDays));
     });
@@ -685,11 +680,11 @@
     const c = CFG.codes;
     setText('kpiWorkLabel', `Hari Kerja (${c.work})`);
     setText('kpiWorkVal', `${sim.totals.work} hr`);
-    setText('kpiWorkSub', `${sim.totals.off} hr ${c.off} tercatat`);
+    setText('kpiWorkSub', `${sim.totals.off} hr ${c.off} • ${sim.totals.holidaysOnWork} tgl merah kerja`);
 
     setText('kpiTcLabel', `Tabungan (${c.tc})`);
     setText('kpiTcVal', `${sim.totals.tc} hr`);
-    setText('kpiTcSub', `Target ${sim.weeksTarget} ${c.tc}/siklus`);
+    setText('kpiTcSub', `Awal: ${sim.initialTcBalance} • Sisa akhir: ${sim.endingTcBank} ${c.tc}`);
 
     setText('kpiLeaveLabel', `Cuti ${c.leave} Diambil`);
     setText('kpiLeaveVal', `${sim.totals.leave} hr`);
@@ -701,9 +696,7 @@
 
     setText('kpiTicketLabel', 'Kuota Tiket');
     setText('kpiTicketVal', `${sim.companyTicketsUsed} / ${CFG.rules.companyTicketQuotaPerYear}`);
-    setText('kpiTicketSub', sim.selfTicketsUsed > 0
-      ? `+ ${sim.selfTicketsUsed} ${CFG.labels.ticketSelf}`
-      : `Semua ${CFG.labels.ticketCompany}`);
+    setText('kpiTicketSub', sim.selfTicketsUsed > 0 ? `+ ${sim.selfTicketsUsed} ${CFG.labels.ticketSelf}` : `Semua ${CFG.labels.ticketCompany}`);
 
     setText('kpiServiceLabel', 'Status Hak CT');
     if (!sim.joinDate) {
@@ -715,7 +708,6 @@
       setText('kpiServiceSub', `Aktif: ${formatDateID(sim.ctEligibleDate, true)}`);
     }
 
-    // Update join-date hint under input
     const joinHint = document.getElementById('joinDateHint');
     if (joinHint) {
       if (!sim.joinDate) {
@@ -725,27 +717,25 @@
         const eligibleNow = sim.startDate >= sim.ctEligibleDate;
         joinHint.className = eligibleNow ? 'field-hint ok' : 'field-hint warn';
         joinHint.textContent = eligibleNow
-          ? `Masa kerja ≥ 1 tahun sejak ${formatDateID(sim.ctEligibleDate, true)} — hak ${CFG.codes.annualLeave} aktif.`
-          : `Hak ${CFG.codes.annualLeave} baru aktif pada periode cuti mulai ${formatDateID(sim.ctEligibleDate, true)}.`;
+          ? `Masa kerja ≥ 1 tahun sejak ${formatDateID(sim.ctEligibleDate, true)} — hak ${c.annualLeave} aktif.`
+          : `Hak ${c.annualLeave} baru aktif pada periode cuti mulai ${formatDateID(sim.ctEligibleDate, true)}.`;
       }
     }
 
-    // Print Employee Summary Bar
     const printBar = document.getElementById('printEmpBar');
     if (printBar) {
-      const offLabel = state.offDay === 'auto'
-        ? 'Otomatis 5:2'
-        : `Tetap ${CFG.labels.dayNamesFull[Number(state.offDay)]}`;
-      const depLabel = state.departureMode === 'work_day6' ? 'Kerja Hari ke-6 (TC utuh)' : 'Pulang stlh Hari ke-5 (C -1)';
+      const offLabel = state.offDay === 'auto' ? 'Otomatis 5:2' : `Tetap ${CFG.labels.dayNamesFull[Number(state.offDay)]}`;
+      const depLabel = state.departureMode === 'work_day6' ? 'Kerja Hari ke-6' : 'Pulang stlh Hari ke-5';
+      const ovCount = Object.keys(state.manualOverrides || {}).length;
       printBar.innerHTML = `
         <div><strong>Nama:</strong> ${escapeHtml(state.employeeName || '-')}</div>
         <div><strong>NIK:</strong> ${escapeHtml(state.employeeNik || '-')}</div>
         <div><strong>Jabatan:</strong> ${escapeHtml(state.employeeRole || '-')}</div>
         <div><strong>Join Date:</strong> ${formatDateID(sim.joinDate, true)}</div>
         <div><strong>Mulai ${escapeHtml(c.work)}1:</strong> ${formatDateID(sim.startDate, true)}</div>
-        <div><strong>Target Cuti:</strong> ${sim.targetHomeDays} Hari</div>
-        <div><strong>Hari ${escapeHtml(c.off)}:</strong> ${escapeHtml(offLabel)}</div>
-        <div><strong>Opsi Pulang:</strong> ${escapeHtml(depLabel)}</div>
+        <div><strong>Saldo Awal TC:</strong> ${sim.initialTcBalance} hr (Akhir: ${sim.endingTcBank})</div>
+        <div><strong>Hari ${escapeHtml(c.off)} / Pulang:</strong> ${escapeHtml(offLabel)} / ${escapeHtml(depLabel)}</div>
+        <div><strong>Override Manual:</strong> ${ovCount} tanggal</div>
       `;
     }
   }
@@ -753,60 +743,55 @@
   function renderMatrix(sim) {
     const table = document.getElementById('matrixTable');
     if (!table) return;
-
     const c = CFG.codes;
-    setText('matrixMeta', `Menampilkan ${sim.months[0].label} s/d ${sim.months[sim.months.length - 1].label} • Klik sel mana pun untuk melihat detail & saran HR`);
+    setText('matrixMeta', `Menampilkan ${sim.months[0].label} s/d ${sim.months[sim.months.length - 1].label} • Klik tanggal mana saja untuk detail, info hari libur, atau override manual (S/I/DL/A)`);
 
-    // Build header
-    let thead = '<thead><tr><th class="col-month">Bulan</th>';
-    for (let d = 1; d <= 31; d++) {
-      thead += `<th>${d}</th>`;
+    const ovCount = Object.keys(state.manualOverrides || {}).length;
+    const ovWrap = document.getElementById('overrideSummaryWrap');
+    if (ovWrap) {
+      ovWrap.style.display = ovCount > 0 ? 'flex' : 'none';
+      setText('overrideCountText', `${ovCount} Override Aktif`);
     }
-    thead += `<th class="col-sum col-sum-first">${escapeHtml(c.work)}</th>`;
-    thead += `<th class="col-sum">${escapeHtml(c.tc)}</th>`;
-    thead += `<th class="col-sum">${escapeHtml(c.leave)}</th>`;
-    thead += `<th class="col-sum">${escapeHtml(c.annualLeave)}</th>`;
-    thead += '</tr></thead>';
 
-    // Build body
+    let thead = '<thead><tr><th class="col-month">Bulan</th>';
+    for (let d = 1; d <= 31; d++) thead += `<th>${d}</th>`;
+    thead += `<th class="col-sum col-sum-first">${escapeHtml(c.work)}</th><th class="col-sum">${escapeHtml(c.tc)}</th><th class="col-sum">${escapeHtml(c.leave)}</th><th class="col-sum">${escapeHtml(c.annualLeave)}</th></tr></thead>`;
+
     let tbody = '<tbody>';
     sim.months.forEach(row => {
       tbody += `<tr><td class="col-month">${escapeHtml(row.label)}</td>`;
       row.cells.forEach(cell => {
         const isSelected = cell.iso && cell.iso === state.selectedDateKey;
         const clickable = cell.iso && cell.kind !== 'preStart' && cell.kind !== 'nonDate';
-        const cls = `day-cell kind-${cell.kind}${isSelected ? ' active-cell' : ''}`;
+        const holCls = (state.showHolidays && cell.holiday)
+          ? (cell.holiday.type === 'national' ? ' has-holiday-national' : ' has-holiday-joint')
+          : '';
+        const ovCls = cell.isOverride ? ' is-override' : '';
+        const cls = `day-cell kind-${cell.kind}${holCls}${ovCls}${isSelected ? ' active-cell' : ''}`;
         const dataAttr = clickable ? ` data-iso="${cell.iso}"` : '';
-        const titleAttr = clickable ? ` title="${escapeHtml(formatDateFullID(cell.date))} — ${escapeHtml(cell.code)}"` : '';
+        const holTip = cell.holiday ? ` • [${cell.holiday.type === 'national' ? 'LIBUR NASIONAL' : 'Cuti Bersama'}: ${cell.holiday.name}]` : '';
+        const noteTip = cell.overrideNote ? ` • Catatan: ${cell.overrideNote}` : '';
+        const titleAttr = clickable ? ` title="${escapeHtml(formatDateFullID(cell.date))} — ${escapeHtml(cell.code)}${escapeHtml(holTip)}${escapeHtml(noteTip)}"` : '';
         tbody += `<td class="${cls}"${dataAttr}${titleAttr}>${escapeHtml(cell.code)}</td>`;
       });
-      tbody += `<td class="col-sum col-sum-first">${row.stats.work}</td>`;
-      tbody += `<td class="col-sum">${row.stats.tc}</td>`;
-      tbody += `<td class="col-sum">${row.stats.leave}</td>`;
-      tbody += `<td class="col-sum">${row.stats.annualLeave}</td>`;
-      tbody += '</tr>';
+      tbody += `<td class="col-sum col-sum-first">${row.stats.work}</td><td class="col-sum">${row.stats.tc}</td><td class="col-sum">${row.stats.leave}</td><td class="col-sum">${row.stats.annualLeave}</td></tr>`;
     });
     tbody += '</tbody>';
 
-    // Build footer total
     const tfoot = `
-      <tfoot>
-        <tr>
-          <td class="col-month">TOTAL</td>
-          <td colspan="31" style="text-align:right;padding-right:10px;color:#475569;font-weight:600;">
-            Ringkasan 12 Bulan (${sim.cycles.length} Periode Cuti • ${sim.totals.off} hr ${escapeHtml(c.off)})
-          </td>
-          <td class="col-sum col-sum-first">${sim.totals.work}</td>
-          <td class="col-sum">${sim.totals.tc}</td>
-          <td class="col-sum">${sim.totals.leave}</td>
-          <td class="col-sum">${sim.totals.annualLeave}</td>
-        </tr>
-      </tfoot>
+      <tfoot><tr>
+        <td class="col-month">TOTAL</td>
+        <td colspan="31" style="text-align:right;padding-right:10px;color:#475569;font-weight:600;">
+          12 Bulan: ${sim.cycles.length} Periode • ${sim.totals.off} hr ${escapeHtml(c.off)} • ${sim.totals.holidaysOnWork} Tgl Merah Kerja${sim.totals.overrides ? ` • ${sim.totals.overrides} Override` : ''}
+        </td>
+        <td class="col-sum col-sum-first">${sim.totals.work}</td>
+        <td class="col-sum">${sim.totals.tc}</td>
+        <td class="col-sum">${sim.totals.leave}</td>
+        <td class="col-sum">${sim.totals.annualLeave}</td>
+      </tr></tfoot>
     `;
 
     table.innerHTML = thead + tbody + tfoot;
-
-    // Bind cell click events
     table.querySelectorAll('td[data-iso]').forEach(td => {
       td.addEventListener('click', () => {
         state.selectedDateKey = td.dataset.iso;
@@ -821,55 +806,59 @@
     const bar = document.getElementById('inspectorBar');
     if (!bar) return;
 
-    // Pick selected cell, or default to first tcLast / offDepart / startDate
     let cell = state.selectedDateKey ? sim.cellMap.get(state.selectedDateKey) : null;
     if (!cell || cell.kind === 'preStart') {
-      // Auto-focus first interesting cell (tcLast or offDepart or startDate)
       for (const item of sim.cellMap.values()) {
-        if (item.kind === 'tcLast' || item.kind === 'offDepart') {
-          cell = item;
-          break;
-        }
+        if (item.kind === 'tcLast' || item.kind === 'offDepart') { cell = item; break; }
       }
       if (!cell) cell = sim.cellMap.get(toISODate(sim.startDate));
     }
 
     if (!cell) {
-      bar.innerHTML = `<div class="inspector-desc">Klik salah satu tanggal pada matriks untuk melihat penjelasan aturan & saran HR.</div>`;
+      bar.innerHTML = `<div class="inspector-desc">Klik salah satu tanggal pada matriks untuk melihat detail, status hari libur, dan kontrol override manual.</div>`;
       return;
     }
 
     const msgTpl = CFG.messages[cell.kind] || CFG.messages.work;
     const color = CFG.colors[cell.kind] || CFG.colors.work;
     const vars = {
-      code: cell.code,
-      workCode: CFG.codes.work,
-      tcCode: CFG.codes.tc,
-      offCode: CFG.codes.off,
-      cCode: CFG.codes.leave,
-      ctCode: CFG.codes.annualLeave,
-      cycle: cell.cycle || 1,
-      weekWork: cell.weekWork ?? 0,
-      minWork: CFG.rules.workDaysPerWeek
+      code: cell.code, workCode: CFG.codes.work, tcCode: CFG.codes.tc,
+      offCode: CFG.codes.off, cCode: CFG.codes.leave, ctCode: CFG.codes.annualLeave,
+      cycle: cell.cycle || 1, weekWork: cell.weekWork ?? 0, minWork: CFG.rules.workDaysPerWeek
     };
 
     const title = formatTemplate(msgTpl.title, vars);
-    const desc = formatTemplate(msgTpl.desc, vars);
-    const advice = formatTemplate(msgTpl.advice, vars);
+    let desc = formatTemplate(msgTpl.desc, vars);
+    let advice = formatTemplate(msgTpl.advice, vars);
+
+    if (cell.earnedTcFromOverride) {
+      desc += ` (Karena syarat ${CFG.rules.workDaysPerWeek} hari kerja terpenuhi dan Dinas Luar dihitung kerja, hak ${CFG.codes.tc} minggu ini tetap terbit.)`;
+    }
+    if (cell.holiday && ['work', 'workPartial', 'tc', 'tcLast', 'duty'].includes(cell.kind)) {
+      advice += ` Hari ini jatuh pada ${cell.holiday.type === 'national' ? 'Hari Libur Nasional' : 'Cuti Bersama'} (${cell.holiday.name}) — cek perhitungan lembur/insentif hari besar sesuai SOP.`;
+    }
 
     let extraMeta = cell.cycle ? `Siklus ke-${cell.cycle}` : 'Pra-Mulai';
-    if (cell.cycleInfo) {
-      extraMeta += ` • ${cell.cycleInfo.ticketLabel} • Total di Rumah: ${cell.cycleInfo.totalHomeDays} hari`;
-    }
+    extraMeta += ` • Bank ${CFG.codes.tc}: ${cell.tcBankSnap ?? 0} hr`;
+    if (cell.cycleInfo) extraMeta += ` • ${cell.cycleInfo.ticketLabel}`;
+
+    const holHtml = cell.holiday
+      ? `<div class="inspector-holiday-banner ${cell.holiday.type}">${cell.holiday.type === 'national' ? '🎉 Libur Nasional' : '📅 Cuti Bersama'}: ${escapeHtml(cell.holiday.name)}</div>`
+      : '';
+
+    const curOv = state.manualOverrides[cell.iso] || null;
+    const ovButtons = [
+      { key: '', label: 'Auto (Normal)' },
+      ...Object.entries(CFG.overrideTypes).map(([k, v]) => ({ key: k, label: `${v.code} (${v.label.split(' ')[0]})` }))
+    ].map(b => `<button type="button" class="override-chip${(curOv ? curOv.type : '') === b.key ? ' active' : ''}" data-ov-type="${b.key}">${escapeHtml(b.label)}</button>`).join('');
 
     bar.innerHTML = `
       <div class="inspector-left">
-        <div class="inspector-badge" style="background:${color.bg};color:${color.text};border-color:${color.border};">
-          ${escapeHtml(cell.code || '-')}
-        </div>
+        <div class="inspector-badge" style="background:${color.bg};color:${color.text};border-color:${color.border};">${escapeHtml(cell.code || '-')}</div>
         <div>
           <h4 class="inspector-title">${escapeHtml(title)}</h4>
           <div class="inspector-date">${escapeHtml(formatDateFullID(cell.date))} &bull; ${escapeHtml(extraMeta)}</div>
+          ${holHtml}
           <p class="inspector-desc">${escapeHtml(desc)}</p>
         </div>
       </div>
@@ -877,22 +866,55 @@
         <strong>Catatan &amp; Saran HR</strong>
         ${escapeHtml(advice)}
       </div>
+      <div class="inspector-override-panel">
+        <div class="override-btn-group">
+          <span style="font-size:11.5px;font-weight:700;color:#334155;margin-right:4px;">Override Tanggal Ini:</span>
+          ${ovButtons}
+        </div>
+        <input type="text" class="override-note-input" id="inspectorOvNote"
+          placeholder="Catatan opsional (misal: SKD Demam / SPPD)..."
+          value="${escapeHtml(curOv ? curOv.note : '')}"
+          ${curOv ? '' : 'disabled'} />
+      </div>
     `;
+
+    // Bind override chips
+    bar.querySelectorAll('[data-ov-type]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.ovType;
+        if (!t) {
+          delete state.manualOverrides[cell.iso];
+          showToast(`Tanggal ${formatDateID(cell.date, true)} dikembalikan ke mode Auto.`);
+        } else {
+          const existingNote = state.manualOverrides[cell.iso]?.note || '';
+          state.manualOverrides[cell.iso] = { type: t, note: existingNote };
+          showToast(`Override ${CFG.overrideTypes[t].code} diterapkan pada ${formatDateID(cell.date, true)}.`);
+        }
+        state.selectedDateKey = cell.iso;
+        saveAndRender();
+      });
+    });
+
+    const noteEl = document.getElementById('inspectorOvNote');
+    if (noteEl && curOv) {
+      noteEl.addEventListener('change', () => {
+        if (state.manualOverrides[cell.iso]) {
+          state.manualOverrides[cell.iso].note = noteEl.value.trim();
+          saveState();
+          renderMatrix(lastSimulation);
+          showToast('Catatan override tersimpan.');
+        }
+      });
+    }
   }
 
   function renderCyclesTable(sim) {
     const tbody = document.getElementById('cyclesTbody');
     if (!tbody) return;
-
     const c = CFG.codes;
+
     if (!sim.cycles.length) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="7" style="text-align:center;color:#64748B;padding:18px;">
-            Belum ada periode cuti yang jatuh dalam rentang 12 bulan ini. Coba percepat tanggal mulai ${escapeHtml(c.work)}1 atau ubah durasi target cuti.
-          </td>
-        </tr>
-      `;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#64748B;padding:18px;">Belum ada periode cuti dalam rentang 12 bulan ini.</td></tr>`;
       return;
     }
 
@@ -902,32 +924,50 @@
         : `<span class="pill pill-self">${escapeHtml(cyc.ticketLabel)}</span>`;
 
       let ctControlHtml = '';
-      if (!sim.joinDate) {
-        ctControlHtml = `<span class="pill pill-locked">Isi Join Date</span>`;
-      } else if (!cyc.isCtEligible) {
-        ctControlHtml = `<span class="pill pill-locked" title="Hak CT aktif mulai ${escapeHtml(formatDateID(cyc.ctEligibleDate, true))}">Terkunci (&lt; 1 thn)</span>`;
-      } else {
+      if (!sim.joinDate) ctControlHtml = `<span class="pill pill-locked">Isi Join Date</span>`;
+      else if (!cyc.isCtEligible) ctControlHtml = `<span class="pill pill-locked" title="Aktif mulai ${escapeHtml(formatDateID(cyc.ctEligibleDate, true))}">Terkunci (&lt; 1 thn)</span>`;
+      else {
         const maxForThis = cyc.ctDaysCount + sim.remainingCTBalance;
         ctControlHtml = `
           <div class="ct-stepper">
             <button type="button" data-ct-dec="${cyc.cycle}" ${cyc.ctDaysCount <= 0 ? 'disabled' : ''}>−</button>
-            <input type="number" min="0" max="${maxForThis}" value="${cyc.ctDaysCount}" data-ct-input="${cyc.cycle}" aria-label="Alokasi ${escapeHtml(c.annualLeave)} Periode ${cyc.cycle}" />
+            <input type="number" min="0" max="${maxForThis}" value="${cyc.ctDaysCount}" data-ct-input="${cyc.cycle}" />
             <button type="button" data-ct-inc="${cyc.cycle}" ${sim.remainingCTBalance <= 0 ? 'disabled' : ''}>+</button>
-          </div>
-        `;
+          </div>`;
       }
+
+      const natHols = cyc.holidaysInLeave.filter(h => h.type === 'national');
+      const holBadge = natHols.length
+        ? `<div class="badge-holiday-hit" title="${escapeHtml(natHols.map(h => h.name).join(', '))}">🎉 ${escapeHtml(natHols[0].name)}${natHols.length > 1 ? ` (+${natHols.length - 1})` : ''}</div>`
+        : '';
 
       const breakdown = `${cyc.offDaysCount} ${c.off} + ${cyc.cDaysCount} ${c.leave}${cyc.ctDaysCount > 0 ? ` + ${cyc.ctDaysCount} ${c.annualLeave}` : ''}`;
 
       return `
         <tr>
-          <td><strong>Periode ${cyc.cycle}</strong></td>
+          <td>
+            <strong>Periode ${cyc.cycle}</strong>
+            ${cyc.hasCustomDays ? '<span class="badge-custom">Custom</span>' : ''}
+            ${holBadge}
+          </td>
           <td>${escapeHtml(formatDateID(cyc.siteStart, true))} – ${escapeHtml(formatDateID(cyc.siteEnd, true))}</td>
           <td><strong>${escapeHtml(formatDateID(cyc.departDate, true))}</strong><br><span style="font-size:11px;color:#64748B;">${escapeHtml(CFG.labels.dayNamesFull[cyc.departDate.getDay()])}</span></td>
           <td>${escapeHtml(formatDateID(cyc.leaveEndDate, true))}<br><span style="font-size:11px;color:#64748B;">Kembali ${escapeHtml(c.work)}1: ${escapeHtml(formatDateID(cyc.returnSiteDate, true))}</span></td>
           <td>
-            <strong>${cyc.totalHomeDays} Hari</strong>
-            <div style="font-size:11px;color:#64748B;">${escapeHtml(breakdown)}</div>
+            <div class="ct-stepper">
+              <button type="button" data-dur-dec="${cyc.cycle}" ${cyc.targetHomeDays <= CFG.rules.minHomeLeaveDays ? 'disabled' : ''}>−</button>
+              <input type="number" min="${CFG.rules.minHomeLeaveDays}" max="${CFG.rules.maxHomeLeaveDays}" value="${cyc.targetHomeDays}" data-dur-input="${cyc.cycle}" />
+              <button type="button" data-dur-inc="${cyc.cycle}" ${cyc.targetHomeDays >= CFG.rules.maxHomeLeaveDays ? 'disabled' : ''}>+</button>
+            </div>
+            <div class="tc-flow-meta"><strong>Total: ${cyc.totalHomeDays} hr</strong> (${escapeHtml(breakdown)})</div>
+          </td>
+          <td>
+            <div class="ct-stepper" title="Jumlah TC yang sengaja ditabung / dibawa ke periode berikutnya">
+              <button type="button" data-save-dec="${cyc.cycle}" ${cyc.saveTcRequested <= 0 ? 'disabled' : ''}>−</button>
+              <input type="number" min="0" max="20" value="${cyc.saveTcRequested}" data-save-input="${cyc.cycle}" />
+              <button type="button" data-save-inc="${cyc.cycle}">+</button>
+            </div>
+            <div class="tc-flow-meta">Awal: ${cyc.tcCarryIn} • +${cyc.tcEarnedThisCycle} • Pakai: ${cyc.cDaysCount} • <strong>Sisa: ${cyc.tcCarryOut}</strong></div>
           </td>
           <td>${ctControlHtml}</td>
           <td>${ticketHtml}</td>
@@ -935,61 +975,233 @@
       `;
     }).join('');
 
-    // Bind CT stepper events
-    tbody.querySelectorAll('[data-ct-dec]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const cyc = Number(btn.dataset.ctDec);
-        const cur = Number(state.ctAllocations[cyc]) || 0;
-        state.ctAllocations[cyc] = Math.max(0, cur - 1);
-        saveAndRender();
-      });
-    });
+    // Bind Flexible Duration steppers
+    const setCycleDur = (cyc, val) => {
+      const clamped = clampInt(val, CFG.rules.minHomeLeaveDays, CFG.rules.maxHomeLeaveDays, state.targetHomeDays);
+      if (clamped === state.targetHomeDays) delete state.cycleHomeDays[cyc];
+      else state.cycleHomeDays[cyc] = clamped;
+      saveAndRender();
+    };
+    tbody.querySelectorAll('[data-dur-dec]').forEach(b => b.addEventListener('click', () => {
+      const cyc = Number(b.dataset.durDec);
+      const cur = state.cycleHomeDays[cyc] ?? state.targetHomeDays;
+      setCycleDur(cyc, cur - 1);
+    }));
+    tbody.querySelectorAll('[data-dur-inc]').forEach(b => b.addEventListener('click', () => {
+      const cyc = Number(b.dataset.durInc);
+      const cur = state.cycleHomeDays[cyc] ?? state.targetHomeDays;
+      setCycleDur(cyc, cur + 1);
+    }));
+    tbody.querySelectorAll('[data-dur-input]').forEach(inp => inp.addEventListener('change', () => {
+      setCycleDur(Number(inp.dataset.durInput), inp.value);
+    }));
 
-    tbody.querySelectorAll('[data-ct-inc]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const cyc = Number(btn.dataset.ctInc);
-        const cur = Number(state.ctAllocations[cyc]) || 0;
-        state.ctAllocations[cyc] = cur + 1;
-        saveAndRender();
-      });
-    });
+    // Bind Save/Carry-Over TC steppers
+    const setCycleSave = (cyc, val) => {
+      const clamped = clampInt(val, 0, 20, 0);
+      if (clamped === 0) delete state.cycleSaveTc[cyc];
+      else state.cycleSaveTc[cyc] = clamped;
+      saveAndRender();
+    };
+    tbody.querySelectorAll('[data-save-dec]').forEach(b => b.addEventListener('click', () => {
+      const cyc = Number(b.dataset.saveDec);
+      setCycleSave(cyc, (state.cycleSaveTc[cyc] || 0) - 1);
+    }));
+    tbody.querySelectorAll('[data-save-inc]').forEach(b => b.addEventListener('click', () => {
+      const cyc = Number(b.dataset.saveInc);
+      setCycleSave(cyc, (state.cycleSaveTc[cyc] || 0) + 1);
+    }));
+    tbody.querySelectorAll('[data-save-input]').forEach(inp => inp.addEventListener('change', () => {
+      setCycleSave(Number(inp.dataset.saveInput), inp.value);
+    }));
 
-    tbody.querySelectorAll('[data-ct-input]').forEach(inp => {
-      inp.addEventListener('change', () => {
-        const cyc = Number(inp.dataset.ctInput);
-        const val = Math.max(0, Math.floor(Number(inp.value) || 0));
-        state.ctAllocations[cyc] = val;
-        saveAndRender();
-      });
-    });
+    // Bind CT steppers
+    tbody.querySelectorAll('[data-ct-dec]').forEach(b => b.addEventListener('click', () => {
+      const cyc = Number(b.dataset.ctDec);
+      state.ctAllocations[cyc] = Math.max(0, (Number(state.ctAllocations[cyc]) || 0) - 1);
+      saveAndRender();
+    }));
+    tbody.querySelectorAll('[data-ct-inc]').forEach(b => b.addEventListener('click', () => {
+      const cyc = Number(b.dataset.ctInc);
+      state.ctAllocations[cyc] = (Number(state.ctAllocations[cyc]) || 0) + 1;
+      saveAndRender();
+    }));
+    tbody.querySelectorAll('[data-ct-input]').forEach(inp => inp.addEventListener('change', () => {
+      state.ctAllocations[Number(inp.dataset.ctInput)] = Math.max(0, Math.floor(Number(inp.value) || 0));
+      saveAndRender();
+    }));
   }
 
-  // ---------- EXCEL EXPORT (ExcelJS with full colors from config.js) ----------
+  // ---------- SHAREABLE URL & SCENARIO MANAGER ----------
+  function encodeStateToHash() {
+    const payload = {
+      v: 2,
+      n: state.employeeName, k: state.employeeNik, r: state.employeeRole,
+      j: state.joinDate, s: state.startDate, h: state.targetHomeDays,
+      o: state.offDay, d: state.departureMode, w: state.workCounterMode,
+      g: state.grayBoxMode, vm: state.viewMode, sh: state.showHolidays ? 1 : 0,
+      cb: state.annualLeaveBalance, tb: state.initialTcBalance,
+      ct: state.ctAllocations, ch: state.cycleHomeDays,
+      cs: state.cycleSaveTc, ov: state.manualOverrides
+    };
+    const json = JSON.stringify(payload);
+    const b64 = btoa(unescape(encodeURIComponent(json)))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return `#s=${b64}`;
+  }
+
+  function applyImportedPayload(p) {
+    if (!p || typeof p !== 'object') return false;
+    const def = createDefaultState();
+    Object.assign(state, def);
+    if (p.v === 2) {
+      if (p.n !== undefined) state.employeeName = String(p.n);
+      if (p.k !== undefined) state.employeeNik = String(p.k);
+      if (p.r !== undefined) state.employeeRole = String(p.r);
+      if (p.j !== undefined) state.joinDate = String(p.j);
+      if (p.s !== undefined) state.startDate = String(p.s);
+      if (p.h !== undefined) state.targetHomeDays = clampInt(p.h, CFG.rules.minHomeLeaveDays, CFG.rules.maxHomeLeaveDays, def.targetHomeDays);
+      if (p.o !== undefined) state.offDay = String(p.o);
+      if (p.d !== undefined) state.departureMode = String(p.d);
+      if (p.w !== undefined) state.workCounterMode = String(p.w);
+      if (p.g !== undefined) state.grayBoxMode = String(p.g);
+      if (p.vm !== undefined) state.viewMode = String(p.vm);
+      if (p.sh !== undefined) state.showHolidays = Boolean(p.sh);
+      if (p.cb !== undefined) state.annualLeaveBalance = clampInt(p.cb, 0, 60, def.annualLeaveBalance);
+      if (p.tb !== undefined) state.initialTcBalance = clampInt(p.tb, 0, 30, 0);
+      if (p.ct && typeof p.ct === 'object') state.ctAllocations = { ...p.ct };
+      if (p.ch && typeof p.ch === 'object') state.cycleHomeDays = { ...p.ch };
+      if (p.cs && typeof p.cs === 'object') state.cycleSaveTc = { ...p.cs };
+      if (p.ov && typeof p.ov === 'object') state.manualOverrides = { ...p.ov };
+    } else {
+      // Raw full state JSON import
+      Object.assign(state, p);
+      state.targetHomeDays = clampInt(state.targetHomeDays, CFG.rules.minHomeLeaveDays, CFG.rules.maxHomeLeaveDays, def.targetHomeDays);
+      state.initialTcBalance = clampInt(state.initialTcBalance, 0, 30, 0);
+      state.ctAllocations = state.ctAllocations || {};
+      state.cycleHomeDays = state.cycleHomeDays || {};
+      state.cycleSaveTc = state.cycleSaveTc || {};
+      state.manualOverrides = state.manualOverrides || {};
+    }
+    return true;
+  }
+
+  function loadStateFromHash() {
+    const hash = window.location.hash || '';
+    if (!hash.startsWith('#s=')) return false;
+    try {
+      let b64 = hash.slice(3).replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const json = decodeURIComponent(escape(atob(b64)));
+      return applyImportedPayload(JSON.parse(json));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function copyShareLink() {
+    const hash = encodeStateToHash();
+    try { history.replaceState(null, '', hash); } catch (_) {}
+    const fullUrl = window.location.href.split('#')[0] + hash;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(fullUrl).then(() => {
+        showToast('Link simulasi berhasil disalin! Siap ditempel ke WhatsApp / HR.');
+      }).catch(() => fallbackCopy(fullUrl));
+    } else {
+      fallbackCopy(fullUrl);
+    }
+  }
+
+  function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      showToast('Link simulasi berhasil disalin ke clipboard.');
+    } catch (_) {
+      prompt('Salin link simulasi di bawah ini:', text);
+    }
+    ta.remove();
+  }
+
+  function getSavedScenarios() {
+    try {
+      const raw = localStorage.getItem(SCENARIOS_KEY);
+      const arr = JSON.parse(raw || '[]');
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  }
+
+  function setSavedScenarios(list) {
+    try { localStorage.setItem(SCENARIOS_KEY, JSON.stringify(list)); } catch (_) {}
+  }
+
+  function renderScenarioList() {
+    const box = document.getElementById('scenarioList');
+    if (!box) return;
+    const list = getSavedScenarios();
+    if (!list.length) {
+      box.innerHTML = `<div style="font-size:12px;color:#64748B;padding:10px;text-align:center;background:#F8FAFC;border-radius:8px;">Belum ada skenario tersimpan di browser ini.</div>`;
+      return;
+    }
+    box.innerHTML = list.map((sc, idx) => `
+      <div class="scenario-item">
+        <div>
+          <div class="scenario-item-title">${escapeHtml(sc.name)}</div>
+          <div class="scenario-item-meta">${escapeHtml(sc.meta || '')}</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button type="button" class="btn btn-soft" style="padding:4px 8px;font-size:11.5px;" data-sc-load="${idx}">Muat</button>
+          <button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:11.5px;color:#9F1239;" data-sc-del="${idx}">Hapus</button>
+        </div>
+      </div>
+    `).join('');
+
+    box.querySelectorAll('[data-sc-load]').forEach(btn => btn.addEventListener('click', () => {
+      const sc = list[Number(btn.dataset.scLoad)];
+      if (sc && applyImportedPayload(sc.data)) {
+        saveAndRender();
+        document.getElementById('scenarioModal')?.classList.remove('open');
+        showToast(`Skenario "${sc.name}" berhasil dimuat.`);
+      }
+    }));
+
+    box.querySelectorAll('[data-sc-del]').forEach(btn => btn.addEventListener('click', () => {
+      const next = list.filter((_, i) => i !== Number(btn.dataset.scDel));
+      setSavedScenarios(next);
+      renderScenarioList();
+      showToast('Skenario dihapus.');
+    }));
+  }
+
+  function exportScenarioJson() {
+    const data = { app: CFG.app.title, version: CFG.app.version, exportedAt: new Date().toISOString(), state: { ...state } };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const safeName = (state.employeeName || 'Karyawan').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    triggerDownload(blob, `KAN_Skenario_${safeName}_${toISODate(new Date())}.json`);
+    showToast('File skenario JSON berhasil diunduh.');
+  }
+
+  // ---------- EXCEL EXPORT (v2.0) ----------
   async function exportToExcel() {
     const sim = lastSimulation;
     if (!sim) return;
-
-    if (!window.ExcelJS) {
-      // Fallback to CSV if offline / CDN blocked
-      exportToCSVFallback(sim);
-      return;
-    }
+    if (!window.ExcelJS) { exportToCSVFallback(sim); return; }
 
     try {
       const wb = new window.ExcelJS.Workbook();
       wb.creator = CFG.app.title;
-      wb.created = new Date();
-
       const c = CFG.codes;
       const hexToArgb = (hex) => 'FF' + String(hex || '#FFFFFF').replace('#', '').toUpperCase();
 
-      // ===== SHEET 1: MATRIKS TIMESHEET =====
-      const ws = wb.addWorksheet('Matriks Timesheet', {
-        views: [{ state: 'frozen', xSplit: 1, ySplit: 5 }]
-      });
-
+      // SHEET 1: MATRIKS
+      const ws = wb.addWorksheet('Matriks Timesheet', { views: [{ state: 'frozen', xSplit: 1, ySplit: 5 }] });
       ws.mergeCells('A1:AJ1');
-      ws.getCell('A1').value = `${CFG.app.companyName} — ${CFG.app.title}`;
+      ws.getCell('A1').value = `${CFG.app.companyName} — ${CFG.app.title} (v${CFG.app.version})`;
       ws.getCell('A1').font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
       ws.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
       ws.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
@@ -997,202 +1209,152 @@
 
       ws.mergeCells('A2:AJ2');
       const offLabel = state.offDay === 'auto' ? 'Otomatis 5:2' : `Tetap ${CFG.labels.dayNamesFull[Number(state.offDay)]}`;
-      ws.getCell('A2').value =
-        `Nama: ${state.employeeName || '-'} | NIK: ${state.employeeNik || '-'} | Jabatan: ${state.employeeRole || '-'} | ` +
-        `Join Date: ${formatDateID(sim.joinDate, true)} | Mulai ${c.work}1: ${formatDateID(sim.startDate, true)} | ` +
-        `Target Cuti: ${sim.targetHomeDays} Hari | Hari ${c.off}: ${offLabel}`;
+      ws.getCell('A2').value = `Nama: ${state.employeeName} | NIK: ${state.employeeNik} | Jabatan: ${state.employeeRole} | Mulai ${c.work}1: ${formatDateID(sim.startDate, true)} | Saldo Awal TC: ${sim.initialTcBalance} | Hari ${c.off}: ${offLabel}`;
       ws.getCell('A2').font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF334155' } };
       ws.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
       ws.getRow(2).height = 20;
 
       ws.mergeCells('A3:AJ3');
-      ws.getCell('A3').value =
-        `Opsi Pulang: ${CFG.labels.departureModes[state.departureMode]} | Sisa Saldo ${c.annualLeave}: ${sim.remainingCTBalance} hari (Terpakai: ${sim.totalCTUsed} hari)`;
+      ws.getCell('A3').value = `Tgl Merah Kerja: ${sim.totals.holidaysOnWork} hr | Override Manual: ${sim.totals.overrides} hr | Sisa Saldo ${c.annualLeave}: ${sim.remainingCTBalance} hr | Sisa Akhir ${c.tc}: ${sim.endingTcBank} hr`;
       ws.getCell('A3').font = { name: 'Calibri', size: 9.5, color: { argb: 'FF475569' } };
       ws.getRow(3).height = 18;
-
-      // Blank spacer row 4
       ws.getRow(4).height = 6;
 
-      // Header Row 5
       const headers = ['Bulan'];
       for (let d = 1; d <= 31; d++) headers.push(d);
       headers.push(c.work, c.tc, c.leave, c.annualLeave);
       const hdrRow = ws.getRow(5);
       hdrRow.values = headers;
       hdrRow.height = 22;
-      hdrRow.eachCell((cell) => {
+      hdrRow.eachCell(cell => {
         cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FF94A3B8' } },
-          bottom: { style: 'medium', color: { argb: 'FF64748B' } },
-          left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
-        };
       });
 
-      // Data Rows (Months)
       sim.months.forEach((mRow, idx) => {
-        const rNum = 6 + idx;
-        const row = ws.getRow(rNum);
+        const row = ws.getRow(6 + idx);
         row.height = 21;
-
         const mCell = row.getCell(1);
         mCell.value = mRow.label;
-        mCell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+        mCell.font = { name: 'Calibri', size: 10, bold: true };
         mCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-        mCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
-        mCell.border = {
-          top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          right: { style: 'medium', color: { argb: 'FF94A3B8' } }
-        };
 
         mRow.cells.forEach((cellData, dIdx) => {
-          const excelCell = row.getCell(2 + dIdx);
-          excelCell.value = cellData.code || '';
+          const ec = row.getCell(2 + dIdx);
+          ec.value = cellData.code || '';
           const colSpec = CFG.colors[cellData.kind] || CFG.colors.work;
-          excelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hexToArgb(colSpec.bg) } };
-          excelCell.font = {
-            name: 'Calibri',
-            size: 9,
+          ec.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hexToArgb(colSpec.bg) } };
+          ec.font = {
+            name: 'Calibri', size: 9,
             bold: cellData.kind !== 'work' && cellData.kind !== 'workPartial',
             color: { argb: hexToArgb(colSpec.text) }
           };
-          excelCell.alignment = { vertical: 'middle', horizontal: 'center' };
-          excelCell.border = {
-            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          ec.alignment = { vertical: 'middle', horizontal: 'center' };
+          const borderColor = (state.showHolidays && cellData.holiday && cellData.holiday.type === 'national') ? 'FFDC2626' : 'FFE2E8F0';
+          ec.border = {
+            top: { style: borderColor === 'FFDC2626' ? 'medium' : 'thin', color: { argb: borderColor } },
             bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
             left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
             right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
           };
         });
 
-        // Summary columns (X, TC, C, CT)
-        const sumVals = [mRow.stats.work, mRow.stats.tc, mRow.stats.leave, mRow.stats.annualLeave];
-        sumVals.forEach((val, sIdx) => {
+        [mRow.stats.work, mRow.stats.tc, mRow.stats.leave, mRow.stats.annualLeave].forEach((val, sIdx) => {
           const sc = row.getCell(33 + sIdx);
           sc.value = val;
-          sc.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
-          sc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+          sc.font = { name: 'Calibri', size: 10, bold: true };
           sc.alignment = { vertical: 'middle', horizontal: 'center' };
-          sc.border = {
-            top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-            left: { style: sIdx === 0 ? 'medium' : 'thin', color: { argb: 'FF94A3B8' } },
-            right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
-          };
         });
       });
 
-      // Totals row
       const totRowIdx = 6 + sim.months.length;
       const totRow = ws.getRow(totRowIdx);
       totRow.height = 23;
       totRow.getCell(1).value = 'TOTAL';
       ws.mergeCells(totRowIdx, 2, totRowIdx, 32);
-      totRow.getCell(2).value = `Total 12 Bulan (${sim.cycles.length} Periode Cuti • ${sim.totals.off} hr ${c.off})`;
+      totRow.getCell(2).value = `12 Bulan (${sim.cycles.length} Periode • ${sim.totals.off} hr ${c.off} • ${sim.totals.holidaysOnWork} Tgl Merah Kerja)`;
       totRow.getCell(33).value = { formula: `SUM(AG6:AG${totRowIdx - 1})`, result: sim.totals.work };
       totRow.getCell(34).value = { formula: `SUM(AH6:AH${totRowIdx - 1})`, result: sim.totals.tc };
       totRow.getCell(35).value = { formula: `SUM(AI6:AI${totRowIdx - 1})`, result: sim.totals.leave };
       totRow.getCell(36).value = { formula: `SUM(AJ6:AJ${totRowIdx - 1})`, result: sim.totals.annualLeave };
-
       for (let col = 1; col <= 36; col++) {
         const cell = totRow.getCell(col);
-        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+        cell.font = { name: 'Calibri', size: 10, bold: true };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
         cell.alignment = { vertical: 'middle', horizontal: col === 2 ? 'right' : 'center' };
-        cell.border = {
-          top: { style: 'medium', color: { argb: 'FF64748B' } },
-          bottom: { style: 'medium', color: { argb: 'FF64748B' } },
-          left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
-        };
       }
 
-      // Column widths
       ws.getColumn(1).width = 13;
-      for (let col = 2; col <= 32; col++) ws.getColumn(col).width = 5.4;
+      for (let col = 2; col <= 32; col++) ws.getColumn(col).width = 5.5;
       for (let col = 33; col <= 36; col++) ws.getColumn(col).width = 6.2;
 
-      // ===== SHEET 2: RINGKASAN PERIODE CUTI =====
+      // SHEET 2: RINGKASAN PERIODE CUTI + CARRY-OVER
       const ws2 = wb.addWorksheet('Ringkasan Periode Cuti');
       ws2.columns = [
         { header: 'Periode', key: 'periode', width: 12 },
-        { header: 'Kerja di Site', key: 'site', width: 26 },
-        { header: 'Tanggal Berangkat', key: 'depart', width: 22 },
-        { header: 'Akhir Cuti', key: 'end', width: 18 },
-        { header: `Kembali (${c.work}1)`, key: 'ret', width: 18 },
-        { header: `Hari ${c.off}`, key: 'off', width: 10 },
-        { header: `Hari ${c.leave}`, key: 'c', width: 10 },
+        { header: 'Kerja di Site', key: 'site', width: 25 },
+        { header: 'Berangkat', key: 'depart', width: 20 },
+        { header: 'Akhir Cuti', key: 'end', width: 16 },
+        { header: `Kembali (${c.work}1)`, key: 'ret', width: 16 },
+        { header: 'TC Awal', key: 'tcIn', width: 10 },
+        { header: 'TC Didapat', key: 'tcEarn', width: 11 },
+        { header: `Pakai ${c.leave}`, key: 'c', width: 10 },
+        { header: 'TC Sisa', key: 'tcOut', width: 10 },
         { header: `Hari ${c.annualLeave}`, key: 'ct', width: 10 },
-        { header: 'Total di Rumah', key: 'total', width: 15 },
+        { header: 'Total Rumah', key: 'total', width: 13 },
+        { header: 'Irisan Libur Nasional', key: 'hol', width: 28 },
         { header: 'Status Tiket', key: 'ticket', width: 24 }
       ];
-
-      const h2 = ws2.getRow(1);
-      h2.height = 24;
-      h2.eachCell(cell => {
-        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+      ws2.getRow(1).eachCell(cell => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
-        cell.alignment = { vertical: 'middle', horizontal: 'center' };
       });
-
       sim.cycles.forEach(cyc => {
-        const r = ws2.addRow({
+        ws2.addRow({
           periode: `Periode ${cyc.cycle}`,
           site: `${formatDateID(cyc.siteStart, true)} – ${formatDateID(cyc.siteEnd, true)}`,
           depart: `${CFG.labels.dayNamesShort[cyc.departDate.getDay()]}, ${formatDateID(cyc.departDate, true)}`,
           end: formatDateID(cyc.leaveEndDate, true),
           ret: formatDateID(cyc.returnSiteDate, true),
-          off: cyc.offDaysCount,
-          c: cyc.cDaysCount,
-          ct: cyc.ctDaysCount,
-          total: cyc.totalHomeDays,
+          tcIn: cyc.tcCarryIn, tcEarn: cyc.tcEarnedThisCycle, c: cyc.cDaysCount,
+          tcOut: cyc.tcCarryOut, ct: cyc.ctDaysCount, total: cyc.totalHomeDays,
+          hol: cyc.holidaysInLeave.map(h => h.name).join('; ') || '-',
           ticket: cyc.ticketLabel
         });
-        r.height = 20;
-        const tkCell = r.getCell(10);
-        tkCell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: cyc.isCompanyTicket ? 'FFDCFCE7' : 'FFFEF3C7' }
-        };
-        tkCell.font = {
-          name: 'Calibri',
-          size: 10,
-          bold: true,
-          color: { argb: cyc.isCompanyTicket ? 'FF166534' : 'FF92400E' }
-        };
       });
 
-      // ===== SHEET 3: LEGENDA & KONFIGURASI AKTIF =====
-      const ws3 = wb.addWorksheet('Legenda & Aturan');
+      // SHEET 3: OVERRIDE & HARI LIBUR
+      const ws3 = wb.addWorksheet('Override & Libur Nasional');
       ws3.columns = [
-        { header: 'Kode', key: 'code', width: 14 },
-        { header: 'Keterangan', key: 'desc', width: 42 },
-        { header: 'Warna Hex', key: 'hex', width: 14 }
+        { header: 'Tanggal', key: 'tgl', width: 16 },
+        { header: 'Kategori', key: 'kat', width: 20 },
+        { header: 'Kode / Status', key: 'kode', width: 16 },
+        { header: 'Keterangan / Catatan', key: 'ket', width: 45 }
       ];
       ws3.getRow(1).eachCell(cell => {
         cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
       });
-      Object.entries(CFG.colors).forEach(([k, v]) => {
-        const r = ws3.addRow({ code: k, desc: v.label, hex: v.bg });
-        r.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hexToArgb(v.bg) } };
-        r.getCell(1).font = { bold: true, color: { argb: hexToArgb(v.text) } };
+      Object.entries(state.manualOverrides || {}).sort().forEach(([iso, ov]) => {
+        const sp = CFG.overrideTypes[ov.type];
+        ws3.addRow({ tgl: iso, kat: 'Override Manual', kode: sp ? sp.code : ov.type, ket: `${sp ? sp.label : ''}${ov.note ? ' — ' + ov.note : ''}` });
       });
+      sim.months.forEach(m => m.cells.forEach(cell => {
+        if (cell.iso && cell.holiday) {
+          ws3.addRow({
+            tgl: cell.iso,
+            kat: cell.holiday.type === 'national' ? 'Libur Nasional' : 'Cuti Bersama',
+            kode: cell.code || '-',
+            ket: cell.holiday.name
+          });
+        }
+      }));
 
-      // Download file
       const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      });
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const safeName = (state.employeeName || 'Karyawan').replace(/[^a-zA-Z0-9_-]+/g, '_');
-      const fileName = `KAN_Timesheet_${safeName}_${sim.startDate.getFullYear()}.xlsx`;
+      const fileName = `KAN_Timesheet_v2_${safeName}_${sim.startDate.getFullYear()}.xlsx`;
       triggerDownload(blob, fileName);
       showToast(`File Excel "${fileName}" berhasil diunduh.`);
     } catch (err) {
@@ -1203,84 +1365,43 @@
 
   function exportToCSVFallback(sim) {
     const c = CFG.codes;
-    const rows = [];
-    const header = ['Bulan'];
-    for (let d = 1; d <= 31; d++) header.push(String(d));
-    header.push(c.work, c.tc, c.leave, c.annualLeave);
-    rows.push(header.join(','));
-
+    const rows = [['Bulan', ...Array.from({ length: 31 }, (_, i) => String(i + 1)), c.work, c.tc, c.leave, c.annualLeave].join(',')];
     sim.months.forEach(m => {
-      const cols = [`"${m.label}"`];
-      m.cells.forEach(cell => cols.push(`"${cell.code || ''}"`));
-      cols.push(m.stats.work, m.stats.tc, m.stats.leave, m.stats.annualLeave);
-      rows.push(cols.join(','));
+      rows.push([`"${m.label}"`, ...m.cells.map(cl => `"${cl.code || ''}"`), m.stats.work, m.stats.tc, m.stats.leave, m.stats.annualLeave].join(','));
     });
-
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    triggerDownload(blob, `KAN_Timesheet_${sim.startDate.getFullYear()}.csv`);
-    showToast('Mode offline terdeteksi: diekspor ke format CSV.');
+    triggerDownload(new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' }), `KAN_Timesheet_${sim.startDate.getFullYear()}.csv`);
+    showToast('Mode offline: diekspor ke format CSV.');
   }
 
   function triggerDownload(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  // ---------- PERSISTENCE (localStorage) ----------
+  // ---------- PERSISTENCE ----------
   function loadState() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (saved && typeof saved === 'object') {
-        Object.assign(state, saved);
-        // Always enforce current config.js minimum home leave rule
-        state.targetHomeDays = Math.max(
-          CFG.rules.minHomeLeaveDays,
-          Math.min(CFG.rules.maxHomeLeaveDays, Number(state.targetHomeDays) || CFG.rules.defaultHomeLeaveDays)
-        );
-      }
-    } catch (_) {
-      // Ignore corrupted localStorage
-    }
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('kan_timesheet_state_v1');
+      if (raw) applyImportedPayload(JSON.parse(raw));
+    } catch (_) {}
   }
 
   function saveState() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (_) {
-      // Ignore quota/private mode errors
-    }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
   }
 
   function resetToDefaults() {
     localStorage.removeItem(STORAGE_KEY);
-    state.employeeName = CFG.defaults.employeeName;
-    state.employeeNik = CFG.defaults.employeeNik;
-    state.employeeRole = CFG.defaults.employeeRole;
-    state.joinDate = CFG.defaults.joinDate;
-    state.startDate = CFG.defaults.startDate;
-    state.targetHomeDays = Math.max(CFG.rules.minHomeLeaveDays, CFG.rules.defaultHomeLeaveDays);
-    state.offDay = CFG.rules.defaultOffDay;
-    state.departureMode = CFG.rules.defaultDepartureMode;
-    state.workCounterMode = CFG.rules.defaultWorkCounterMode;
-    state.grayBoxMode = CFG.rules.defaultGrayBoxMode;
-    state.viewMode = CFG.rules.defaultViewMode;
-    state.annualLeaveBalance = CFG.defaults.annualLeaveBalance;
-    state.ctAllocations = {};
-    state.selectedDateKey = null;
+    Object.assign(state, createDefaultState());
+    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (_) {}
     syncFormInputs();
     renderAll();
-    showToast('Pengaturan dikembalikan ke nilai default config.js.');
+    showToast('Semua pengaturan, override, dan durasi custom di-reset ke default config.js.');
   }
 
-  // ---------- MAIN RENDER ORCHESTRATOR ----------
   function renderAll() {
     lastSimulation = runSimulation();
     renderKPIs(lastSimulation);
@@ -1297,14 +1418,11 @@
 
   // ---------- EVENT BINDINGS ----------
   function bindEvents() {
-    const bindInput = (id, key, transform) => {
+    const bindInput = (id, key) => {
       const el = document.getElementById(id);
       if (!el) return;
       const evt = el.tagName === 'SELECT' || el.type === 'date' ? 'change' : 'input';
-      el.addEventListener(evt, () => {
-        state[key] = transform ? transform(el.value) : el.value;
-        saveAndRender();
-      });
+      el.addEventListener(evt, () => { state[key] = el.value; saveAndRender(); });
     };
 
     bindInput('inputName', 'employeeName');
@@ -1317,79 +1435,124 @@
     bindInput('inputGrayMode', 'grayBoxMode');
     bindInput('inputViewMode', 'viewMode');
 
-    const homeInput = document.getElementById('inputHomeDays');
-    if (homeInput) {
-      homeInput.addEventListener('change', () => {
-        const minD = CFG.rules.minHomeLeaveDays;
-        const maxD = CFG.rules.maxHomeLeaveDays;
-        let val = Math.floor(Number(homeInput.value) || minD);
-        if (val < minD) {
-          val = minD;
-          showToast(`Minimal pengajuan cuti di rumah adalah ${minD} hari sesuai SOP.`);
-        }
-        if (val > maxD) val = maxD;
-        state.targetHomeDays = val;
-        saveAndRender();
-      });
-    }
-
-    const ctBalInput = document.getElementById('inputCtBalance');
-    if (ctBalInput) {
-      ctBalInput.addEventListener('change', () => {
-        state.annualLeaveBalance = Math.max(0, Math.min(60, Math.floor(Number(ctBalInput.value) || 0)));
-        saveAndRender();
-      });
-    }
-
-    document.querySelectorAll('input[name="departureMode"]').forEach(r => {
-      r.addEventListener('change', () => {
-        if (r.checked) {
-          state.departureMode = r.value;
-          saveAndRender();
-        }
-      });
+    document.getElementById('inputHomeDays')?.addEventListener('change', (e) => {
+      const minD = CFG.rules.minHomeLeaveDays, maxD = CFG.rules.maxHomeLeaveDays;
+      let val = clampInt(e.target.value, minD, maxD, minD);
+      if (Number(e.target.value) < minD) showToast(`Minimal pengajuan cuti di rumah adalah ${minD} hari sesuai SOP.`);
+      state.targetHomeDays = val;
+      saveAndRender();
     });
 
-    // Header Actions
-    const btnReset = document.getElementById('btnReset');
-    if (btnReset) btnReset.addEventListener('click', resetToDefaults);
+    document.getElementById('inputCtBalance')?.addEventListener('change', (e) => {
+      state.annualLeaveBalance = clampInt(e.target.value, 0, 60, 0);
+      saveAndRender();
+    });
 
-    const btnExcel = document.getElementById('btnExportExcel');
-    if (btnExcel) btnExcel.addEventListener('click', exportToExcel);
+    document.getElementById('inputInitialTc')?.addEventListener('change', (e) => {
+      state.initialTcBalance = clampInt(e.target.value, 0, 30, 0);
+      saveAndRender();
+    });
 
-    const btnPrint = document.getElementById('btnPrintPdf');
-    if (btnPrint) btnPrint.addEventListener('click', () => window.print());
+    document.getElementById('inputShowHolidays')?.addEventListener('change', (e) => {
+      state.showHolidays = e.target.checked;
+      saveAndRender();
+    });
+
+    document.querySelectorAll('input[name="departureMode"]').forEach(r => {
+      r.addEventListener('change', () => { if (r.checked) { state.departureMode = r.value; saveAndRender(); } });
+    });
+
+    // Topbar actions
+    document.getElementById('btnReset')?.addEventListener('click', resetToDefaults);
+    document.getElementById('btnExportExcel')?.addEventListener('click', exportToExcel);
+    document.getElementById('btnPrintPdf')?.addEventListener('click', () => window.print());
+    document.getElementById('btnShareLink')?.addEventListener('click', copyShareLink);
+
+    // Clear buttons
+    document.getElementById('btnClearOverrides')?.addEventListener('click', () => {
+      state.manualOverrides = {};
+      saveAndRender();
+      showToast('Semua override manual telah dihapus.');
+    });
+
+    document.getElementById('btnClearCycleCustom')?.addEventListener('click', () => {
+      state.cycleHomeDays = {};
+      state.cycleSaveTc = {};
+      saveAndRender();
+      showToast('Durasi custom & simpan TC per periode dikembalikan ke default.');
+    });
+
+    document.getElementById('btnClearCT')?.addEventListener('click', () => {
+      state.ctAllocations = {};
+      saveAndRender();
+      showToast(`Alokasi ${CFG.codes.annualLeave} pada semua periode di-reset ke 0.`);
+    });
 
     // Config Modal
-    const modal = document.getElementById('configModal');
-    const btnShowCfg = document.getElementById('btnShowConfig');
-    const btnCloseCfg = document.getElementById('btnCloseConfig');
-    if (btnShowCfg && modal) {
-      btnShowCfg.addEventListener('click', () => {
-        const pre = document.getElementById('configPreviewCode');
-        if (pre) pre.textContent = JSON.stringify(CFG, null, 2);
-        modal.classList.add('open');
-      });
-    }
-    if (btnCloseCfg && modal) {
-      btnCloseCfg.addEventListener('click', () => modal.classList.remove('open'));
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.classList.remove('open');
-      });
-    }
+    const cfgModal = document.getElementById('configModal');
+    document.getElementById('btnShowConfig')?.addEventListener('click', () => {
+      const pre = document.getElementById('configPreviewCode');
+      if (pre) pre.textContent = JSON.stringify(CFG, null, 2);
+      cfgModal?.classList.add('open');
+    });
+    document.getElementById('btnCloseConfig')?.addEventListener('click', () => cfgModal?.classList.remove('open'));
+    cfgModal?.addEventListener('click', (e) => { if (e.target === cfgModal) cfgModal.classList.remove('open'); });
 
-    // Clear CT Allocations button
-    const btnClearCT = document.getElementById('btnClearCT');
-    if (btnClearCT) {
-      btnClearCT.addEventListener('click', () => {
-        state.ctAllocations = {};
-        saveAndRender();
-        showToast(`Alokasi ${CFG.codes.annualLeave} pada semua periode di-reset ke 0.`);
+    // Scenario Modal
+    const scModal = document.getElementById('scenarioModal');
+    document.getElementById('btnOpenScenario')?.addEventListener('click', () => {
+      renderScenarioList();
+      scModal?.classList.add('open');
+    });
+    document.getElementById('btnCloseScenario')?.addEventListener('click', () => scModal?.classList.remove('open'));
+    scModal?.addEventListener('click', (e) => { if (e.target === scModal) scModal.classList.remove('open'); });
+
+    document.getElementById('btnSaveScenario')?.addEventListener('click', () => {
+      const inp = document.getElementById('inputScenarioName');
+      const name = (inp?.value || '').trim() || `Skenario ${state.employeeName} (${toISODate(new Date())})`;
+      const list = getSavedScenarios();
+      const ovCount = Object.keys(state.manualOverrides || {}).length;
+      list.unshift({
+        name,
+        savedAt: new Date().toISOString(),
+        meta: `Mulai ${state.startDate} • Default ${state.targetHomeDays} hr • TC Awal ${state.initialTcBalance} • ${ovCount} override`,
+        data: JSON.parse(JSON.stringify(state))
       });
-    }
+      setSavedScenarios(list.slice(0, 20));
+      if (inp) inp.value = '';
+      renderScenarioList();
+      showToast(`Skenario "${name}" tersimpan.`);
+    });
+
+    document.getElementById('btnExportJson')?.addEventListener('click', exportScenarioJson);
+    document.getElementById('btnCopyShareFromModal')?.addEventListener('click', copyShareLink);
+
+    const fileInput = document.getElementById('inputImportJsonFile');
+    document.getElementById('btnImportJson')?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result));
+          const target = parsed.state ? parsed.state : parsed;
+          if (applyImportedPayload(target)) {
+            saveAndRender();
+            scModal?.classList.remove('open');
+            showToast(`File "${file.name}" berhasil dimuat.`);
+          } else {
+            showToast('Format file JSON tidak dikenali.');
+          }
+        } catch (_) {
+          showToast('Gagal membaca file JSON.');
+        }
+        fileInput.value = '';
+      };
+      reader.readAsText(file);
+    });
   }
 
-  // ---------- SMALL DOM HELPERS ----------
   function setText(id, txt) {
     const el = document.getElementById(id);
     if (el) el.textContent = txt;
@@ -1407,17 +1570,19 @@
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 3400);
   }
 
   // ---------- INIT ----------
   document.addEventListener('DOMContentLoaded', () => {
     injectConfigTheme();
-    loadState();
+    const fromHash = loadStateFromHash();
+    if (!fromHash) loadState();
     renderStaticBrand();
     renderLegend();
     syncFormInputs();
     bindEvents();
     renderAll();
+    if (fromHash) showToast('Simulasi dimuat dari link yang dibagikan.');
   });
 })();
