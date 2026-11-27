@@ -142,7 +142,7 @@ window.KAN_CONFIG = {
     },
     offDepart: {
       title: 'Hari Keberangkatan / Tidak Terbit TC ({code})',
-      desc: 'Anda memilih opsi berangkat setelah hari kerja ke-5 berakhir (malam hari ke-5 atau dinihari/pagi hari ke-6). Karena tidak bekerja di hari ke-6, {tcCode} terakhir tidak terbit sehingga jatah {cCode} berkurang 1 hari.',
+      desc: 'Anda memilih opsi berangkat setelah hari kerja ke-5 berakhir (malam hari ke-5 atau dinihari/pagi hari ke-6). Karena tidak bekerja di hari ke-6, {tcCode} terakhir tidak terbit.',
       advice: 'Total hari di luar site tetap sama dengan target, namun komposisinya menjadi 2 hari {offCode} di awal diikuti sisa hak {cCode}.'
     },
     offLeave: {
