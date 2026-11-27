@@ -59,9 +59,9 @@ window.KAN_CONFIG = {
 
   // 4. NILAI DEFAULT FORM SAAT PERTAMA KALI DIBUKA
   defaults: {
-    employeeName: 'Budi Santoso',
-    employeeNik: 'KAN-2025-0142',
-    employeeRole: 'Asisten Afdeling / Staff Site',
+    employeeName: 'IrwanS',
+    employeeNik: 'KAN-2026-007',
+    employeeRole: 'HR Manager / Manager Site',
     joinDate: '2025-02-01',          // YYYY-MM-DD (untuk cek masa kerja >= 1 tahun hak CT)
     startDate: '2026-01-05',         // YYYY-MM-DD (tanggal mulai X1 di site)
     annualLeaveBalance: 15           // Sisa saldo Cuti Tahunan (CT) saat ini
@@ -70,7 +70,7 @@ window.KAN_CONFIG = {
   // 5. LABEL BAHASA & PENAMAAN
   labels: {
     ticketCompany: 'Tiket Perusahaan',
-    ticketSelf: 'Tiket Mandiri',
+    ticketSelf: 'Tiket Pribadi',
     workCounterModes: {
       site_day: 'Counter Hari di Site (X1–X5, TC1, OFF, X8…)',
       work_day: 'Murni Hari Kerja Fisik (X1–X5, TC1, OFF, X6…)'
