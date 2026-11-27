@@ -76,8 +76,8 @@ window.KAN_CONFIG = {
       work_day: 'Murni Hari Kerja Fisik (X1–X5, TC1, OFF, X6…)'
     },
     departureModes: {
-      work_day6: 'Masuk kerja penuh di hari ke-6 (TC terakhir terbit & dihitung jadi jatah C)',
-      leave_after_day5: 'Berangkat setelah hari kerja ke-5 berakhir — Malam / Hari ke-6 dinihari-pagi (Hari ke-6 jadi OFF, jatah C berkurang 1)'
+      leave_after_day5: 'Berangkat setelah hari kerja ke-5 berakhir — Malam / Hari ke-6 dinihari-pagi (Hari ke-6 jadi OFF)',
+      work_day6: 'Masuk kerja penuh di hari ke-6 (TC terakhir terbit & dihitung jadi jatah C)'
     },
     grayBoxModes: {
       trv: 'Tampilkan Kotak Abu-Abu Transisi (TRV? / Perjalanan Kembali)',
