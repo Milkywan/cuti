@@ -1,14 +1,9 @@
 /**
  * ============================================================================
- * KAN TIMESHEET & LEAVE SIMULATOR — CONFIGURATION FILE (config.js)
+ * KAN TIMESHEET & LEAVE SIMULATOR — CONFIGURATION FILE (config.js) v2.0.0
  * ============================================================================
- * Ubah variabel di file ini untuk menyesuaikan kode, aturan SOP, label,
- * warna, dan teks saran sesuai kondisi aktual di lapangan — TANPA perlu
- * mengubah kode inti di app.js atau index.html.
- *
- * Tips:
- * - Setelah mengubah nilai di bawah, simpan file lalu refresh browser (Ctrl+F5).
- * - Pastikan tanda kutip ('...') dan koma (,) tetap rapi.
+ * Pusat seluruh variabel lapangan, kode matriks, aturan SOP, override manual,
+ * daftar hari libur nasional, palet warna, dan pesan saran HR.
  * ============================================================================
  */
 
@@ -16,72 +11,83 @@ window.KAN_CONFIG = {
   // 1. IDENTITAS APLIKASI & PERUSAHAAN
   app: {
     title: 'KAN Timesheet & Leave Simulator',
-    subtitle: 'Simulasi Roster 5:2, Tabungan Cuti (TC), Cuti Tahunan (CT), & Kuota Tiket',
+    subtitle: 'Simulasi Roster 5:2, Carry-Over TC, Override Manual, Libur Nasional & Kuota Tiket',
     companyName: 'PT Kalimantan Agro Nusantara (KAN)',
     departmentDefault: 'Operasional / Site',
-    version: '1.0.0'
+    version: '2.0.0'
   },
 
-  // 2. KODE KETERANGAN MATRIKS (Ubah di sini jika kode lapangan berubah, misal 'X' -> 'Y')
+  // 2. KODE KETERANGAN MATRIKS
   codes: {
-    work: 'X',              // Kode Hari Kerja Reguler (otomatis jadi X1, X2, dst.)
-    tc: 'TC',               // Kode Tabungan Cuti (otomatis jadi TC1, TC2, dst.)
-    off: 'OFF',             // Kode Libur Mingguan / Awal Pulang / Hari Keberangkatan
-    leave: 'C',             // Kode Cuti dari Tabungan TC (otomatis jadi C1, C2, dst.)
-    annualLeave: 'CT',      // Kode Cuti Tahunan (otomatis jadi CT1, CT2, dst.)
-    postLeaveGap: 'TRV?',   // Kode Kotak Abu-Abu transisi pasca-cuti sebelum X1 siklus baru
-    preStart: '',           // Isi sel sebelum tanggal mulai X1
-    nonDate: ''             // Isi sel tanggal yang tidak ada (misal 30 Feb)
+    work: 'X',
+    tc: 'TC',
+    off: 'OFF',
+    leave: 'C',
+    annualLeave: 'CT',
+    postLeaveGap: 'TRV?',
+    preStart: '',
+    nonDate: ''
   },
 
-  // 3. ATURAN BISNIS & SOP
+  // 3. TIPE OVERRIDE MANUAL (Ubah countsAsWork sesuai SOP site Anda)
+  overrideTypes: {
+    sick:      { code: 'S',    label: 'Sakit (Surat Dokter)',  countsAsWork: false },
+    permit:    { code: 'I',    label: 'Izin Resmi',            countsAsWork: false },
+    duty:      { code: 'DL',   label: 'Dinas Luar / Training', countsAsWork: true  },
+    alpha:     { code: 'A',    label: 'Mangkir / Alpha',       countsAsWork: false },
+    customOff: { code: 'OFF*', label: 'OFF Manual / Tukar',    countsAsWork: false }
+  },
+
+  // 4. ATURAN BISNIS & SOP
   rules: {
-    workDaysPerWeek: 5,              // Wajib genap 5 hari kerja (X) sebelum TC terbit pada minggu berjalan
-    minHomeLeaveDays: 9,             // Kunci minimal pengajuan cuti di rumah (1 OFF + 8 C = 9 hari)
-    maxHomeLeaveDays: 30,            // Batas atas input simulasi durasi cuti di rumah
-    defaultHomeLeaveDays: 14,        // Nilai awal durasi cuti di rumah
-    homeLeavePresets: [9, 10, 14, 21], // Tombol preset cepat (semua >= minHomeLeaveDays)
+    workDaysPerWeek: 5,
+    minHomeLeaveDays: 9,
+    maxHomeLeaveDays: 30,
+    defaultHomeLeaveDays: 14,
+    homeLeavePresets: [9, 10, 14, 21],
 
-    companyTicketQuotaPerYear: 3,    // Periode 1..3 = Tiket Perusahaan, Periode 4+ = Tiket Mandiri
-    ticketQuotaResetMode: 'calendar_year', // 'calendar_year' (reset tiap ganti tahun kalender) | 'simulation_window'
+    companyTicketQuotaPerYear: 3,
+    ticketQuotaResetMode: 'calendar_year', // 'calendar_year' | 'simulation_window'
 
-    annualLeaveEntitlementDays: 15,  // Hak cuti tahunan default setelah genap 1 tahun kerja
-    annualLeaveMinServiceMonths: 12, // Masa kerja minimal (bulan) agar hak CT aktif
+    annualLeaveEntitlementDays: 15,
+    annualLeaveMinServiceMonths: 12,
 
-    defaultWorkCounterMode: 'site_day',    // 'site_day' (X1-X5, TC1, OFF, X8...) | 'work_day' (X1-X5, TC1, OFF, X6...)
-    defaultOffDay: 'auto',                 // 'auto' (ikut siklus 5:2 dari X1) atau angka 0 (Min) s/d 6 (Sab)
-    defaultDepartureMode: 'leave_after_day5', // 'leave_after_day5' (berangkat stlh hari ke-5) | 'work_day6' (kerja penuh hari ke-6, TC terakhir terbit)
-    defaultGrayBoxMode: 'work',             // 'trv' (tampilkan kotak abu-abu TRV?) | 'work' (langsung mulai X1)
-    defaultViewMode: 'full_year',          // 'full_year' (Jan-Des tahun X1) | 'rolling_12' (12 bulan berjalan)
+    defaultWorkCounterMode: 'site_day',    // 'site_day' | 'work_day'
+    defaultOffDay: 'auto',                 // 'auto' | 0..6
+    defaultDepartureMode: 'work_day6',     // 'work_day6' | 'leave_after_day5'
+    defaultGrayBoxMode: 'trv',             // 'trv' | 'work'
+    defaultViewMode: 'full_year',          // 'full_year' | 'rolling_12'
+    defaultShowHolidays: true,
 
-    allowDecimalCT: false                  // Biarkan false (CT selalu hari penuh)
+    allowDecimalCT: false
   },
 
-  // 4. NILAI DEFAULT FORM SAAT PERTAMA KALI DIBUKA
+  // 5. NILAI DEFAULT FORM
   defaults: {
-    employeeName: 'IrwanS',
-    employeeNik: 'KAN-2026-007',
-    employeeRole: 'HR Manager / Manager Site',
-    joinDate: '2025-02-01',          // YYYY-MM-DD (untuk cek masa kerja >= 1 tahun hak CT)
-    startDate: '2026-01-05',         // YYYY-MM-DD (tanggal mulai X1 di site)
-    annualLeaveBalance: 15           // Sisa saldo Cuti Tahunan (CT) saat ini
+    employeeName: 'Budi Santoso',
+    employeeNik: 'KAN-2025-0142',
+    employeeRole: 'Asisten Afdeling / Staff Site',
+    joinDate: '2025-02-01',
+    startDate: '2026-01-05',
+    annualLeaveBalance: 15,
+    initialTcBalance: 0
   },
 
-  // 5. LABEL BAHASA & PENAMAAN
+  // 6. LABEL BAHASA & PENAMAAN
   labels: {
     ticketCompany: 'Tiket Perusahaan',
-    ticketSelf: 'Tiket Pribadi',
+    ticketSelf: 'Tiket Mandiri',
     workCounterModes: {
       site_day: 'Counter Hari di Site (X1–X5, TC1, OFF, X8…)',
       work_day: 'Murni Hari Kerja Fisik (X1–X5, TC1, OFF, X6…)'
     },
     departureModes: {
-      leave_after_day5: 'Berangkat setelah hari kerja ke-5 berakhir — Malam / Hari ke-6 dinihari-pagi (Hari ke-6 jadi OFF)',
-      work_day6: 'Masuk kerja penuh di hari ke-6 (TC terakhir terbit & dihitung jadi jatah C)'
+      work_day6: 'Masuk kerja penuh di hari ke-6 (TC terakhir terbit & dihitung jadi jatah C)',
+      leave_after_day5: 'Berangkat setelah hari kerja ke-5 berakhir — Malam / Hari ke-6 dinihari-pagi (Hari ke-6 jadi OFF, jatah C berkurang 1)'
     },
     grayBoxModes: {
-      work: 'Langsung Masuk Kerja X1 Hari Berikutnya (Tanpa Jeda)',
-      trv: 'Tampilkan Kotak Abu-Abu Transisi (TRV? / Perjalanan Kembali)'
+      trv: 'Tampilkan Kotak Abu-Abu Transisi (TRV? / Perjalanan Kembali)',
+      work: 'Langsung Masuk Kerja X1 Hari Berikutnya (Tanpa Jeda)'
     },
     viewModes: {
       full_year: 'Tahun Penuh (Jan – Des)',
@@ -96,7 +102,7 @@ window.KAN_CONFIG = {
     ]
   },
 
-  // 6. PALET WARNA PASTEL (Otomatis sinkron ke UI Matriks, Legenda, Print PDF, dan Export Excel)
+  // 7. PALET WARNA PASTEL (Sinkron ke UI, Legenda, Print PDF & Excel)
   colors: {
     work:         { bg: '#FFFFFF', text: '#1E293B', border: '#CBD5E1', label: 'Hari Kerja Reguler' },
     workPartial:  { bg: '#F8FAFC', text: '#334155', border: '#CBD5E1', label: 'Hari Kerja (Minggu < 5 Hari, Belum TC)' },
@@ -109,11 +115,91 @@ window.KAN_CONFIG = {
     annualLeave:  { bg: '#F3E8FF', text: '#6B21A8', border: '#C084FC', label: 'Cuti Tahunan (CT)' },
     postLeaveGap: { bg: '#E2E8F0', text: '#475569', border: '#94A3B8', label: 'Transisi Pasca-Cuti (Konfirmasi HR)' },
     preStart:     { bg: '#F8FAFC', text: '#94A3B8', border: '#E2E8F0', label: 'Pra-Mulai Roster' },
-    nonDate:      { bg: '#CBD5E1', text: '#64748B', border: '#CBD5E1', label: 'Tanggal Non-Kalender' }
+    nonDate:      { bg: '#CBD5E1', text: '#64748B', border: '#CBD5E1', label: 'Tanggal Non-Kalender' },
+    // Warna Override Manual
+    sick:         { bg: '#FFE4E6', text: '#9F1239', border: '#FDA4AF', label: 'Override: Sakit (S)' },
+    permit:       { bg: '#E0E7FF', text: '#3730A3', border: '#A5B4FC', label: 'Override: Izin (I)' },
+    duty:         { bg: '#CFFAFE', text: '#155E75', border: '#67E8F9', label: 'Override: Dinas Luar (DL)' },
+    alpha:        { bg: '#FECACA', text: '#991B1B', border: '#F87171', label: 'Override: Mangkir / Alpha (A)' },
+    customOff:    { bg: '#E0F2FE', text: '#0C4A6E', border: '#38BDF8', label: 'Override: OFF Manual (OFF*)' }
   },
 
-  // 7. TEMPLATE PESAN & SARAN HR (Untuk Popover / Inspector saat sel diklik)
-  // Placeholder tersedia: {code}, {workCode}, {tcCode}, {offCode}, {cCode}, {ctCode}, {cycle}, {weekWork}, {minWork}
+  // 8. HARI LIBUR NASIONAL & CUTI BERSAMA INDONESIA (Sesuaikan kapan saja dgn SKB 3 Menteri)
+  // type: 'national' (Libur Nasional) | 'joint' (Cuti Bersama)
+  holidays: {
+    // --- 2025 ---
+    '2025-01-01': { name: 'Tahun Baru 2025 Masehi', type: 'national' },
+    '2025-01-27': { name: 'Isra Mikraj Nabi Muhammad SAW', type: 'national' },
+    '2025-01-28': { name: 'Cuti Bersama Tahun Baru Imlek', type: 'joint' },
+    '2025-01-29': { name: 'Tahun Baru Imlek 2576 Kongzili', type: 'national' },
+    '2025-03-28': { name: 'Cuti Bersama Hari Suci Nyepi', type: 'joint' },
+    '2025-03-29': { name: 'Hari Suci Nyepi (Tahun Baru Saka 1947)', type: 'national' },
+    '2025-03-31': { name: 'Hari Raya Idulfitri 1446 H', type: 'national' },
+    '2025-04-01': { name: 'Hari Raya Idulfitri 1446 H', type: 'national' },
+    '2025-04-02': { name: 'Cuti Bersama Idulfitri 1446 H', type: 'joint' },
+    '2025-04-03': { name: 'Cuti Bersama Idulfitri 1446 H', type: 'joint' },
+    '2025-04-04': { name: 'Cuti Bersama Idulfitri 1446 H', type: 'joint' },
+    '2025-04-07': { name: 'Cuti Bersama Idulfitri 1446 H', type: 'joint' },
+    '2025-04-18': { name: 'Wafat Yesus Kristus', type: 'national' },
+    '2025-04-20': { name: 'Kebangkitan Yesus Kristus (Paskah)', type: 'national' },
+    '2025-05-01': { name: 'Hari Buruh Internasional', type: 'national' },
+    '2025-05-12': { name: 'Hari Raya Waisak 2569 BE', type: 'national' },
+    '2025-05-29': { name: 'Kenaikan Yesus Kristus', type: 'national' },
+    '2025-06-01': { name: 'Hari Lahir Pancasila', type: 'national' },
+    '2025-06-06': { name: 'Hari Raya Iduladha 1446 H', type: 'national' },
+    '2025-06-27': { name: '1 Muharam Tahun Baru Islam 1447 H', type: 'national' },
+    '2025-08-17': { name: 'Hari Kemerdekaan RI', type: 'national' },
+    '2025-09-05': { name: 'Maulid Nabi Muhammad SAW', type: 'national' },
+    '2025-12-25': { name: 'Hari Raya Natal', type: 'national' },
+    '2025-12-26': { name: 'Cuti Bersama Hari Raya Natal', type: 'joint' },
+
+    // --- 2026 ---
+    '2026-01-01': { name: 'Tahun Baru 2026 Masehi', type: 'national' },
+    '2026-01-16': { name: 'Isra Mikraj Nabi Muhammad SAW', type: 'national' },
+    '2026-02-16': { name: 'Cuti Bersama Tahun Baru Imlek', type: 'joint' },
+    '2026-02-17': { name: 'Tahun Baru Imlek 2577 Kongzili', type: 'national' },
+    '2026-03-18': { name: 'Cuti Bersama Hari Suci Nyepi', type: 'joint' },
+    '2026-03-19': { name: 'Hari Suci Nyepi (Tahun Baru Saka 1948)', type: 'national' },
+    '2026-03-20': { name: 'Hari Raya Idulfitri 1447 H', type: 'national' },
+    '2026-03-21': { name: 'Hari Raya Idulfitri 1447 H', type: 'national' },
+    '2026-03-23': { name: 'Cuti Bersama Idulfitri 1447 H', type: 'joint' },
+    '2026-03-24': { name: 'Cuti Bersama Idulfitri 1447 H', type: 'joint' },
+    '2026-04-03': { name: 'Wafat Yesus Kristus', type: 'national' },
+    '2026-04-05': { name: 'Kebangkitan Yesus Kristus (Paskah)', type: 'national' },
+    '2026-05-01': { name: 'Hari Buruh Internasional', type: 'national' },
+    '2026-05-14': { name: 'Kenaikan Yesus Kristus', type: 'national' },
+    '2026-05-15': { name: 'Cuti Bersama Kenaikan Yesus Kristus', type: 'joint' },
+    '2026-05-27': { name: 'Hari Raya Iduladha 1447 H', type: 'national' },
+    '2026-05-28': { name: 'Cuti Bersama Iduladha 1447 H', type: 'joint' },
+    '2026-05-31': { name: 'Hari Raya Waisak 2570 BE', type: 'national' },
+    '2026-06-01': { name: 'Hari Lahir Pancasila', type: 'national' },
+    '2026-06-16': { name: '1 Muharam Tahun Baru Islam 1448 H', type: 'national' },
+    '2026-08-17': { name: 'Hari Kemerdekaan RI', type: 'national' },
+    '2026-08-25': { name: 'Maulid Nabi Muhammad SAW', type: 'national' },
+    '2026-12-24': { name: 'Cuti Bersama Hari Raya Natal', type: 'joint' },
+    '2026-12-25': { name: 'Hari Raya Natal', type: 'national' },
+
+    // --- 2027 ---
+    '2027-01-01': { name: 'Tahun Baru 2027 Masehi', type: 'national' },
+    '2027-01-05': { name: 'Isra Mikraj Nabi Muhammad SAW', type: 'national' },
+    '2027-02-06': { name: 'Tahun Baru Imlek 2578 Kongzili', type: 'national' },
+    '2027-03-09': { name: 'Hari Suci Nyepi (Tahun Baru Saka 1949)', type: 'national' },
+    '2027-03-10': { name: 'Hari Raya Idulfitri 1448 H', type: 'national' },
+    '2027-03-11': { name: 'Hari Raya Idulfitri 1448 H', type: 'national' },
+    '2027-03-26': { name: 'Wafat Yesus Kristus', type: 'national' },
+    '2027-03-28': { name: 'Kebangkitan Yesus Kristus (Paskah)', type: 'national' },
+    '2027-05-01': { name: 'Hari Buruh Internasional', type: 'national' },
+    '2027-05-06': { name: 'Kenaikan Yesus Kristus', type: 'national' },
+    '2027-05-17': { name: 'Hari Raya Iduladha 1448 H', type: 'national' },
+    '2027-05-20': { name: 'Hari Raya Waisak 2571 BE', type: 'national' },
+    '2027-06-01': { name: 'Hari Lahir Pancasila', type: 'national' },
+    '2027-06-06': { name: '1 Muharam Tahun Baru Islam 1449 H', type: 'national' },
+    '2027-08-15': { name: 'Maulid Nabi Muhammad SAW', type: 'national' },
+    '2027-08-17': { name: 'Hari Kemerdekaan RI', type: 'national' },
+    '2027-12-25': { name: 'Hari Raya Natal', type: 'national' }
+  },
+
+  // 9. TEMPLATE PESAN & SARAN HR
   messages: {
     work: {
       title: 'Hari Kerja Reguler ({code})',
@@ -122,8 +208,8 @@ window.KAN_CONFIG = {
     },
     workPartial: {
       title: 'Hari Kerja — Minggu Belum Genap ({code})',
-      desc: 'Hari ini adalah H-1 sebelum hari {offCode} tetap, namun akumulasi hari kerja minggu berjalan baru {weekWork} hari (kurang dari syarat {minWork} hari). Sesuai SOP, {tcCode} belum terbit dan hari ini dihitung hari kerja reguler.',
-      advice: 'Perolehan {tcCode} akan mulai normal pada minggu berikutnya setelah genap {minWork} hari kerja penuh.'
+      desc: 'Hari ini adalah H-1 sebelum hari {offCode}, namun akumulasi hari kerja minggu berjalan baru {weekWork} hari (kurang dari syarat {minWork} hari). Sesuai SOP, {tcCode} belum terbit dan hari ini dihitung hari kerja reguler.',
+      advice: 'Perolehan {tcCode} akan terbit pada minggu berikutnya setelah genap {minWork} hari kerja penuh.'
     },
     tc: {
       title: 'Tabungan Cuti ({code})',
@@ -132,8 +218,8 @@ window.KAN_CONFIG = {
     },
     tcLast: {
       title: 'TC Terakhir Sebelum Pulang ({code})',
-      desc: 'Tabungan cuti terakhir pada Siklus ke-{cycle}. Dengan bekerja penuh hari ini, jatah {cCode} Anda utuh maksimal dan besok langsung masuk hari {offCode} awal pulang.',
-      advice: 'Saran HR: Jika ingin berangkat di hari ini, pastikan koordinasi izin keberangkatan sore/malam setelah jam kerja selesai agar status {tcCode} tetap sah.'
+      desc: 'Tabungan cuti terakhir pada Siklus ke-{cycle}. Dengan bekerja penuh hari ini, jatah {cCode} Anda terpenuhi dan besok langsung masuk hari {offCode} awal pulang.',
+      advice: 'Saran HR: Jika ingin berangkat di hari ini, koordinasikan izin keberangkatan sore/malam setelah jam kerja selesai agar status {tcCode} tetap sah.'
     },
     offSite: {
       title: 'Libur Mingguan di Site ({code})',
@@ -142,36 +228,60 @@ window.KAN_CONFIG = {
     },
     offDepart: {
       title: 'Hari Keberangkatan / Tidak Terbit TC ({code})',
-      desc: 'Anda memilih opsi berangkat setelah hari kerja ke-5 berakhir (malam hari ke-5 atau dinihari/pagi hari ke-6). Karena tidak bekerja di hari ke-6, {tcCode} terakhir tidak terbit.',
-      advice: 'Total hari di luar site tetap sama dengan target, namun komposisinya menjadi 2 hari {offCode} di awal diikuti sisa hak {cCode}.'
+      desc: 'Opsi berangkat setelah hari kerja ke-5 berakhir aktif. Karena tidak bekerja di hari ke-6, {tcCode} terakhir tidak terbit sehingga jatah {cCode} berkurang 1 hari.',
+      advice: 'Total hari di luar site tetap sesuai target, dengan komposisi 2 hari {offCode} di awal diikuti sisa hak {cCode}.'
     },
     offLeave: {
       title: 'Hari OFF Awal Periode Cuti ({code})',
-      desc: 'Hari libur mingguan yang menjadi pembuka periode pulang Siklus ke-{cycle}, langsung disambung rangkaian hari {cCode}.',
+      desc: 'Hari libur mingguan pembuka periode pulang Siklus ke-{cycle}, langsung disambung rangkaian hari {cCode}.',
       advice: 'Pastikan formulir pengajuan cuti & tiket telah disetujui atasan dan HR Site minimal H-14.'
     },
     leave: {
       title: 'Cuti dari Tabungan TC ({code})',
-      desc: 'Penggunaan hak cuti hasil tabungan {tcCode} pada Siklus ke-{cycle}.',
+      desc: 'Penggunaan hak cuti hasil tabungan {tcCode} (termasuk carry-over jika ada) pada Siklus ke-{cycle}.',
       advice: 'Perhatikan tanggal kembali ke site agar tidak memotong hak kehadiran siklus berikutnya.'
     },
     annualLeave: {
       title: 'Cuti Tahunan ({code})',
-      desc: 'Tambahan hari libur di rumah dari saldo Cuti Tahunan (Opsi A: menambah durasi di rumah tanpa mengurangi hak {cCode}). Hanya aktif setelah masa kerja genap 1 tahun.',
+      desc: 'Tambahan hari libur di rumah dari saldo Cuti Tahunan (Opsi A: menambah durasi di rumah tanpa mengurangi hak {cCode}).',
       advice: 'Saldo Cuti Tahunan otomatis terpotong sesuai jumlah hari {ctCode} yang dialokasikan pada periode ini.'
     },
     postLeaveGap: {
       title: 'Kotak Transisi Pasca-Cuti ({code})',
-      desc: 'Hari jeda/transisi antara hari cuti terakhir dan dimulainya hari kerja {workCode}1 siklus berikutnya (biasanya digunakan sebagai hari perjalanan balik ke site).',
-      advice: 'Konfirmasi kebijakan HR Site: apakah hari perjalanan kembali dihitung sebagai hari travel terpisah atau wajib sudah masuk {workCode}1.'
+      desc: 'Hari jeda/transisi antara hari cuti terakhir dan dimulainya hari kerja {workCode}1 siklus berikutnya (hari perjalanan balik ke site).',
+      advice: 'Konfirmasi kebijakan HR Site: apakah hari perjalanan kembali dihitung hari travel terpisah atau wajib sudah masuk {workCode}1.'
+    },
+    sick: {
+      title: 'Override Manual: Sakit ({code})',
+      desc: 'Tanggal ini ditandai Sakit secara manual pada Siklus ke-{cycle}. Secara default tidak menambah hitungan hari kerja fisik minggu berjalan sehingga dapat menggeser penerbitan {tcCode}.',
+      advice: 'Lampirkan Surat Keterangan Dokter (SKD) ke HR Site. Jika SOP site Anda tetap mengakui Sakit untuk TC, ubah countsAsWork: true di config.js.'
+    },
+    permit: {
+      title: 'Override Manual: Izin Resmi ({code})',
+      desc: 'Tanggal ini ditandai Izin secara manual pada Siklus ke-{cycle}. Akumulasi hari kerja minggu berjalan berkurang 1 hari.',
+      advice: 'Pastikan formulir izin telah ditandatangani atasan langsung dan HR Site.'
+    },
+    duty: {
+      title: 'Override Manual: Dinas Luar / Training ({code})',
+      desc: 'Tanggal ini ditandai Dinas Luar / Training pada Siklus ke-{cycle}. Tetap dihitung sebagai hari kerja sah sehingga hak {tcCode} mingguan tetap aman.',
+      advice: 'Simpan Surat Perintah Perjalanan Dinas (SPPD) untuk validasi absensi akhir bulan.'
+    },
+    alpha: {
+      title: 'Override Manual: Mangkir / Alpha ({code})',
+      desc: 'Tanggal ini ditandai Alpha pada Siklus ke-{cycle}. Syarat {minWork} hari kerja minggu berjalan tidak tercapai sehingga {tcCode} minggu ini tidak terbit.',
+      advice: 'Kehadiran tanpa keterangan dapat memengaruhi evaluasi disiplin dan menggeser jadwal pulang 1 minggu.'
+    },
+    customOff: {
+      title: 'Override Manual: OFF Tambahan / Tukar ({code})',
+      desc: 'Tanggal ini ditandai OFF manual pada Siklus ke-{cycle}. Hari kerja minggu berjalan tidak bertambah pada tanggal ini.',
+      advice: 'Jika merupakan tukar hari libur, pastikan persetujuan kepala departemen tercatat di absensi.'
     }
   },
 
-  // 8. BLOK TANDA TANGAN (Muncul saat Cetak / Export PDF)
+  // 10. BLOK TANDA TANGAN (Muncul saat Cetak / Export PDF)
   signatures: [
     { title: 'Dibuat Oleh,', role: 'Karyawan' },
-    { title: 'Diperiksa Oleh,', role: 'HR Site' },
-    { title: 'Diketahui Oleh,', role: 'Atasan Langsung' },
-    { title: 'Disetujui Oleh,', role: 'HR Manager' }
+    { title: 'Diperiksa Oleh,', role: 'Atasan Langsung / KTU' },
+    { title: 'Disetujui Oleh,', role: 'HR Site / Estate Manager' }
   ]
 };
