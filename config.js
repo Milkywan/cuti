@@ -51,7 +51,7 @@ window.KAN_CONFIG = {
     defaultWorkCounterMode: 'site_day',    // 'site_day' (X1-X5, TC1, OFF, X8...) | 'work_day' (X1-X5, TC1, OFF, X6...)
     defaultOffDay: 'auto',                 // 'auto' (ikut siklus 5:2 dari X1) atau angka 0 (Min) s/d 6 (Sab)
     defaultDepartureMode: 'leave_after_day5', // 'leave_after_day5' (berangkat stlh hari ke-5) | 'work_day6' (kerja penuh hari ke-6, TC terakhir terbit)
-    defaultGrayBoxMode: 'trv',             // 'trv' (tampilkan kotak abu-abu TRV?) | 'work' (langsung mulai X1)
+    defaultGrayBoxMode: 'work',             // 'trv' (tampilkan kotak abu-abu TRV?) | 'work' (langsung mulai X1)
     defaultViewMode: 'full_year',          // 'full_year' (Jan-Des tahun X1) | 'rolling_12' (12 bulan berjalan)
 
     allowDecimalCT: false                  // Biarkan false (CT selalu hari penuh)
