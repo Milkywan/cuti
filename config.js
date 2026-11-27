@@ -80,8 +80,8 @@ window.KAN_CONFIG = {
       work_day6: 'Masuk kerja penuh di hari ke-6 (TC terakhir terbit & dihitung jadi jatah C)'
     },
     grayBoxModes: {
-      trv: 'Tampilkan Kotak Abu-Abu Transisi (TRV? / Perjalanan Kembali)',
-      work: 'Langsung Masuk Kerja X1 Hari Berikutnya (Tanpa Jeda)'
+      work: 'Langsung Masuk Kerja X1 Hari Berikutnya (Tanpa Jeda)',
+      trv: 'Tampilkan Kotak Abu-Abu Transisi (TRV? / Perjalanan Kembali)'
     },
     viewModes: {
       full_year: 'Tahun Penuh (Jan – Des)',
