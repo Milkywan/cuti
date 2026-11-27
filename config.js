@@ -170,7 +170,8 @@ window.KAN_CONFIG = {
   // 8. BLOK TANDA TANGAN (Muncul saat Cetak / Export PDF)
   signatures: [
     { title: 'Dibuat Oleh,', role: 'Karyawan' },
-    { title: 'Diperiksa Oleh,', role: 'Atasan Langsung / KTU' },
-    { title: 'Disetujui Oleh,', role: 'HR Site / Estate Manager' }
+    { title: 'Diperiksa Oleh,', role: 'HR Site' },
+    { title: 'Diketahui Oleh,', role: 'Atasan Langsung' },
+    { title: 'Disetujui Oleh,', role: 'HR Manager' }
   ]
 };
