@@ -2,8 +2,12 @@
  * ============================================================================
  * KAN TIMESHEET & LEAVE SIMULATOR — CONFIGURATION FILE (config.js) v2.0.0
  * ============================================================================
- * Pusat seluruh variabel lapangan, kode matriks, aturan SOP, override manual,
- * daftar hari libur nasional, palet warna, dan pesan saran HR.
+ * Pusat seluruh variabel lapangan, kode matriks, aturan SOP, P.O.H (Point of Hire),
+ * override manual, daftar hari libur nasional, palet warna, dan blok tanda tangan.
+ *
+ * Tips:
+ * - Setelah mengubah nilai di bawah, simpan file lalu refresh browser (Ctrl+F5).
+ * - Pastikan tanda kutip ('...') dan koma (,) tetap rapi.
  * ============================================================================
  */
 
@@ -11,13 +15,13 @@ window.KAN_CONFIG = {
   // 1. IDENTITAS APLIKASI & PERUSAHAAN
   app: {
     title: 'KAN Timesheet & Leave Simulator',
-    subtitle: 'Simulasi Roster 5:2, Carry-Over TC, Override Manual, Libur Nasional & Kuota Tiket',
+    subtitle: 'Simulasi Roster 5:2, P.O.H, Kunci Periode, Carry-Over TC, Override Manual & Libur Nasional',
     companyName: 'PT Kalimantan Agro Nusantara (KAN)',
     departmentDefault: 'Operasional / Site',
     version: '2.0.0'
   },
 
-  // 2. KODE KETERANGAN MATRIKS
+  // 2. KODE KETERANGAN MATRIKS (Ubah di sini jika kode lapangan berubah, misal 'X' -> 'Y')
   codes: {
     work: 'X',
     tc: 'TC',
@@ -29,7 +33,41 @@ window.KAN_CONFIG = {
     nonDate: ''
   },
 
-  // 3. TIPE OVERRIDE MANUAL (Ubah countsAsWork sesuai SOP site Anda)
+  // 3. ATURAN P.O.H (POINT OF HIRE) & KATEGORI JABATAN
+  pohRules: {
+    ring1: {
+      label: 'Ring 1 — Lokal Site (Non-Tiket)',
+      shortLabel: 'Ring 1 (Lokal)',
+      ticketQuotaPerYear: 0,
+      ticketLabel: 'Non-Tiket (Lokal Site)',
+      selfTicketLabel: 'Non-Tiket (Lokal Site)',
+      defaultCity: 'Lokal Site'
+    },
+    ring2: {
+      label: 'Ring 2 — Lokal Provinsi (Darat/Laut)',
+      shortLabel: 'Ring 2 (Provinsi)',
+      ticketQuotaPerYear: 3,
+      ticketLabel: 'Transport POH Perusahaan',
+      selfTicketLabel: 'Transport Mandiri',
+      defaultCity: 'Balikpapan / Samarinda'
+    },
+    ring3: {
+      label: 'Ring 3 — Non-Lokal (Pesawat)',
+      shortLabel: 'Ring 3 (Non-Lokal)',
+      ticketQuotaPerYear: 3,
+      ticketLabel: 'Tiket Perusahaan',
+      selfTicketLabel: 'Tiket Mandiri',
+      defaultCity: 'Surabaya (SUB)'
+    }
+  },
+
+  employeeGrades: [
+    'Non-Staff',
+    'Staff',
+    'SPV / Manager'
+  ],
+
+  // 4. TIPE OVERRIDE MANUAL (Ubah countsAsWork sesuai SOP site Anda)
   overrideTypes: {
     sick:      { code: 'S',    label: 'Sakit (Surat Dokter)',  countsAsWork: false },
     permit:    { code: 'I',    label: 'Izin Resmi',            countsAsWork: false },
@@ -38,15 +76,15 @@ window.KAN_CONFIG = {
     customOff: { code: 'OFF*', label: 'OFF Manual / Tukar',    countsAsWork: false }
   },
 
-  // 4. ATURAN BISNIS & SOP
+  // 5. ATURAN BISNIS & SOP
   rules: {
     workDaysPerWeek: 5,
     minHomeLeaveDays: 9,
     maxHomeLeaveDays: 30,
     defaultHomeLeaveDays: 14,
-    homeLeavePresets: [9, 10, 14, 21],
+    homeLeavePresets: [9, 10, 11, 14, 21],
 
-    companyTicketQuotaPerYear: 3,
+    companyTicketQuotaPerYear: 3,          // Fallback kuota tiket tahunan (otomatis ikut pohRules)
     ticketQuotaResetMode: 'calendar_year', // 'calendar_year' | 'simulation_window'
 
     annualLeaveEntitlementDays: 15,
@@ -55,25 +93,28 @@ window.KAN_CONFIG = {
     defaultWorkCounterMode: 'site_day',    // 'site_day' | 'work_day'
     defaultOffDay: 'auto',                 // 'auto' | 0..6
     defaultDepartureMode: 'work_day6',     // 'work_day6' | 'leave_after_day5'
-    defaultGrayBoxMode: 'trv',             // 'trv' | 'work'
+    defaultGrayBoxMode: 'work',            // 'work' (langsung mulai X1) | 'trv' (tampilkan kotak abu-abu TRV?)
     defaultViewMode: 'full_year',          // 'full_year' | 'rolling_12'
     defaultShowHolidays: true,
 
     allowDecimalCT: false
   },
 
-  // 5. NILAI DEFAULT FORM
+  // 6. NILAI DEFAULT FORM SAAT PERTAMA KALI DIBUKA
   defaults: {
     employeeName: 'Budi Santoso',
     employeeNik: 'KAN-2025-0142',
     employeeRole: 'Asisten Afdeling / Staff Site',
+    employeeGrade: 'Staff',
+    pohCategory: 'ring3',
+    pohCity: 'Surabaya (SUB)',
     joinDate: '2025-02-01',
     startDate: '2026-01-05',
     annualLeaveBalance: 15,
     initialTcBalance: 0
   },
 
-  // 6. LABEL BAHASA & PENAMAAN
+  // 7. LABEL BAHASA & PENAMAAN
   labels: {
     ticketCompany: 'Tiket Perusahaan',
     ticketSelf: 'Tiket Mandiri',
@@ -86,8 +127,8 @@ window.KAN_CONFIG = {
       leave_after_day5: 'Berangkat setelah hari kerja ke-5 berakhir — Malam / Hari ke-6 dinihari-pagi (Hari ke-6 jadi OFF, jatah C berkurang 1)'
     },
     grayBoxModes: {
-      trv: 'Tampilkan Kotak Abu-Abu Transisi (TRV? / Perjalanan Kembali)',
-      work: 'Langsung Masuk Kerja X1 Hari Berikutnya (Tanpa Jeda)'
+      work: 'Langsung Masuk Kerja X1 Hari Berikutnya (Tanpa Jeda)',
+      trv: 'Tampilkan Kotak Abu-Abu Transisi (TRV? / Perjalanan Kembali)'
     },
     viewModes: {
       full_year: 'Tahun Penuh (Jan – Des)',
@@ -102,7 +143,7 @@ window.KAN_CONFIG = {
     ]
   },
 
-  // 7. PALET WARNA PASTEL (Sinkron ke UI, Legenda, Print PDF & Excel)
+  // 8. PALET WARNA PASTEL (Otomatis sinkron ke UI Matriks, Legenda, Print PDF & Excel)
   colors: {
     work:         { bg: '#FFFFFF', text: '#1E293B', border: '#CBD5E1', label: 'Hari Kerja Reguler' },
     workPartial:  { bg: '#F8FAFC', text: '#334155', border: '#CBD5E1', label: 'Hari Kerja (Minggu < 5 Hari, Belum TC)' },
@@ -124,7 +165,7 @@ window.KAN_CONFIG = {
     customOff:    { bg: '#E0F2FE', text: '#0C4A6E', border: '#38BDF8', label: 'Override: OFF Manual (OFF*)' }
   },
 
-  // 8. HARI LIBUR NASIONAL & CUTI BERSAMA INDONESIA (Sesuaikan kapan saja dgn SKB 3 Menteri)
+  // 9. HARI LIBUR NASIONAL & CUTI BERSAMA INDONESIA (Sesuaikan dgn SKB 3 Menteri)
   // type: 'national' (Libur Nasional) | 'joint' (Cuti Bersama)
   holidays: {
     // --- 2025 ---
@@ -199,7 +240,7 @@ window.KAN_CONFIG = {
     '2027-12-25': { name: 'Hari Raya Natal', type: 'national' }
   },
 
-  // 9. TEMPLATE PESAN & SARAN HR
+  // 10. TEMPLATE PESAN & SARAN HR
   messages: {
     work: {
       title: 'Hari Kerja Reguler ({code})',
@@ -278,10 +319,11 @@ window.KAN_CONFIG = {
     }
   },
 
-  // 10. BLOK TANDA TANGAN (Muncul saat Cetak / Export PDF)
+  // 11. BLOK TANDA TANGAN (Otomatis sejajar 1 baris berapapun jumlahnya saat Print / PDF)
   signatures: [
     { title: 'Dibuat Oleh,', role: 'Karyawan' },
-    { title: 'Diperiksa Oleh,', role: 'Atasan Langsung / KTU' },
-    { title: 'Disetujui Oleh,', role: 'HR Site / Estate Manager' }
+    { title: 'Diperiksa Oleh,', role: 'HR Site' },
+    { title: 'Diketahui Oleh,', role: 'Atasan Langsung' },
+    { title: 'Disetujui Oleh,', role: 'HR Manager' }
   ]
 };

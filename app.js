@@ -2,8 +2,14 @@
  * ============================================================================
  * KAN TIMESHEET & LEAVE SIMULATOR — CORE ENGINE & UI CONTROLLER (app.js v2.0)
  * ============================================================================
- * Fase 1: Carry-Over TC, Durasi Fleksibel per Periode, Kalender Libur Nasional,
- * Custom Override Sel Manual (S/I/DL/A/OFF*), Shareable URL & Scenario Manager.
+ * Fase 1 Lengkap:
+ * - Profil P.O.H (Ring 1/2/3 + Kota/Bandara) & Kategori Jabatan terhubung ke SOP
+ * - Kunci Periode (Lock History): periode terkunci kebal dari perubahan skema global
+ * - Durasi Fleksibel per Periode & Carry-Over TC (Saldo Awal + Simpan TC)
+ * - Kalender Hari Libur Nasional Indonesia (2025–2027)
+ * - Custom Override Sel Manual (S, I, DL, A, OFF*) + Catatan
+ * - Shareable Link (#s=...) & Scenario Manager (LocalStorage + Export/Import JSON)
+ * - Export Excel (.xlsx) & Print PDF A4 Landscape (4+ Tanda Tangan Sejajar 1 Baris)
  * ============================================================================
  */
 
@@ -25,6 +31,9 @@
       employeeName: CFG.defaults.employeeName,
       employeeNik: CFG.defaults.employeeNik,
       employeeRole: CFG.defaults.employeeRole,
+      employeeGrade: CFG.defaults.employeeGrade || (CFG.employeeGrades && CFG.employeeGrades[1]) || 'Staff',
+      pohCategory: CFG.defaults.pohCategory || 'ring3',
+      pohCity: CFG.defaults.pohCity || '',
       joinDate: CFG.defaults.joinDate,
       startDate: CFG.defaults.startDate,
       targetHomeDays: Math.max(CFG.rules.minHomeLeaveDays, CFG.rules.defaultHomeLeaveDays),
@@ -39,6 +48,7 @@
       ctAllocations: {},   // { [cycle]: days }
       cycleHomeDays: {},   // { [cycle]: targetHomeDaysOverride }
       cycleSaveTc: {},     // { [cycle]: extraTcToCarryOver }
+      lockedCycles: {},    // { [cycle]: { targetHomeDays, saveTc, ctDays, departureMode, grayBoxMode, lockedAt } }
       manualOverrides: {}, // { [isoDate]: { type: 'sick'|'permit'|'duty'|'alpha'|'customOff', note: '' } }
       selectedDateKey: null
     };
@@ -98,6 +108,18 @@
     return (CFG.holidays && CFG.holidays[iso]) ? CFG.holidays[iso] : null;
   }
 
+  function getPohSpec() {
+    const rules = CFG.pohRules || {};
+    return rules[state.pohCategory] || rules.ring3 || {
+      label: 'Ring 3 — Non-Lokal (Pesawat)',
+      shortLabel: 'Ring 3',
+      ticketQuotaPerYear: CFG.rules.companyTicketQuotaPerYear || 3,
+      ticketLabel: CFG.labels.ticketCompany,
+      selfTicketLabel: CFG.labels.ticketSelf,
+      defaultCity: ''
+    };
+  }
+
   function formatTemplate(tpl, vars) {
     return String(tpl || '').replace(/\{(\w+)\}/g, (_, k) =>
       vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : `{${k}}`
@@ -125,6 +147,7 @@
     const startDate = parseISODate(state.startDate) || parseISODate(CFG.defaults.startDate) || new Date();
     const joinDate = parseISODate(state.joinDate);
     const ctEligibleDate = getAnnualLeaveEligibleDate(joinDate);
+    const pohSpec = getPohSpec();
 
     // 12-month window
     const months = [];
@@ -146,27 +169,44 @@
     const minHomeDays = Math.max(2, Number(CFG.rules.minHomeLeaveDays) || 9);
     const maxHomeDays = Math.max(minHomeDays, Number(CFG.rules.maxHomeLeaveDays) || 30);
     const globalTargetHome = clampInt(state.targetHomeDays, minHomeDays, maxHomeDays, minHomeDays);
-    const ticketQuota = Math.max(1, Number(CFG.rules.companyTicketQuotaPerYear) || 3);
+    const ticketQuota = Math.max(0, Number(pohSpec.ticketQuotaPerYear ?? CFG.rules.companyTicketQuotaPerYear));
 
     let remainingCTBalance = clampInt(state.annualLeaveBalance, 0, 60, 0);
     let tcBank = clampInt(state.initialTcBalance, 0, 30, 0);
 
-    // Helper: compute target TC for active cycle (supports custom duration + carry-over)
+    // Per-cycle parameters: locked snapshot takes priority over global settings
     function getCycleTargets(cycleNum, carryIn) {
-      const hasCustomDays = state.cycleHomeDays[cycleNum] !== undefined;
-      const targetHome = hasCustomDays
-        ? clampInt(state.cycleHomeDays[cycleNum], minHomeDays, maxHomeDays, globalTargetHome)
-        : globalTargetHome;
-      const saveTcReq = clampInt(state.cycleSaveTc[cycleNum] || 0, 0, 20, 0);
+      const lockSnap = (state.lockedCycles && state.lockedCycles[cycleNum]) ? state.lockedCycles[cycleNum] : null;
+      const isLocked = Boolean(lockSnap);
+      const depMode = isLocked ? (lockSnap.departureMode || state.departureMode) : state.departureMode;
+      const grayMode = isLocked ? (lockSnap.grayBoxMode || state.grayBoxMode) : state.grayBoxMode;
 
-      if (state.departureMode === 'leave_after_day5') {
+      const hasCustomDays = isLocked
+        ? Number(lockSnap.targetHomeDays) !== globalTargetHome
+        : (state.cycleHomeDays[cycleNum] !== undefined);
+
+      const rawTarget = isLocked
+        ? lockSnap.targetHomeDays
+        : (state.cycleHomeDays[cycleNum] !== undefined ? state.cycleHomeDays[cycleNum] : globalTargetHome);
+
+      const targetHome = clampInt(rawTarget, minHomeDays, maxHomeDays, globalTargetHome);
+      const saveTcReq = clampInt(isLocked ? (lockSnap.saveTc || 0) : (state.cycleSaveTc[cycleNum] || 0), 0, 20, 0);
+      const requestedCT = clampInt(isLocked ? (lockSnap.ctDays || 0) : (state.ctAllocations[cycleNum] || 0), 0, 60, 0);
+
+      if (depMode === 'leave_after_day5') {
         const cNeeded = Math.max(1, targetHome - 2);
         const tcGoalBeforeDepart = Math.max(0, cNeeded + saveTcReq - carryIn);
-        return { targetHome, hasCustomDays, saveTcReq, cNeeded, tcGoalBeforeDepart, tcGoalWork6: tcGoalBeforeDepart + 1 };
+        return {
+          isLocked, depMode, grayMode, targetHome, hasCustomDays,
+          saveTcReq, requestedCT, cNeeded, tcGoalBeforeDepart, tcGoalWork6: tcGoalBeforeDepart + 1
+        };
       } else {
         const cNeeded = Math.max(1, targetHome - 1);
         const tcGoalWork6 = Math.max(1, cNeeded + saveTcReq - carryIn);
-        return { targetHome, hasCustomDays, saveTcReq, cNeeded, tcGoalBeforeDepart: tcGoalWork6 - 1, tcGoalWork6 };
+        return {
+          isLocked, depMode, grayMode, targetHome, hasCustomDays,
+          saveTcReq, requestedCT, cNeeded, tcGoalBeforeDepart: tcGoalWork6 - 1, tcGoalWork6
+        };
       }
     }
 
@@ -181,6 +221,7 @@
     let leaveQueue = [];
     let currentSiteStart = null;
     let currentCycleObj = null;
+    let activeCycleGrayMode = state.grayBoxMode;
 
     const cellMap = new Map();
     const cycles = [];
@@ -188,21 +229,34 @@
 
     function registerCycleLeave(departDate, earnedTcCount, departedAfterDay5) {
       const cfgTgt = getCycleTargets(cycle, tcBank);
+      activeCycleGrayMode = cfgTgt.grayMode;
+
       const tcCarryIn = tcBank;
       const totalTcAvailable = tcCarryIn + earnedTcCount;
       const cUsed = Math.min(totalTcAvailable, cfgTgt.cNeeded);
       const tcCarryOut = Math.max(0, totalTcAvailable - cUsed);
-      tcBank = tcCarryOut; // Carry forward to next cycle!
+      tcBank = tcCarryOut;
 
       const leaveYear = departDate.getFullYear();
       const quotaBucket = CFG.rules.ticketQuotaResetMode === 'simulation_window' ? 'ALL' : String(leaveYear);
       ticketCountByYear[quotaBucket] = (ticketCountByYear[quotaBucket] || 0) + 1;
       const ticketSeq = ticketCountByYear[quotaBucket];
-      const isCompanyTicket = ticketSeq <= ticketQuota;
+
+      let ticketType = 'self'; // 'company' | 'self' | 'local'
+      let ticketLabel = '';
+      if (ticketQuota === 0) {
+        ticketType = 'local';
+        ticketLabel = pohSpec.ticketLabel || 'Non-Tiket (Lokal Site)';
+      } else if (ticketSeq <= ticketQuota) {
+        ticketType = 'company';
+        ticketLabel = `${pohSpec.ticketLabel || CFG.labels.ticketCompany} (${ticketSeq}/${ticketQuota})`;
+      } else {
+        ticketType = 'self';
+        ticketLabel = `${pohSpec.selfTicketLabel || CFG.labels.ticketSelf} (ke-${ticketSeq})`;
+      }
 
       const isCtEligible = Boolean(ctEligibleDate && departDate >= ctEligibleDate);
-      const requestedCT = Math.max(0, Math.floor(Number(state.ctAllocations[cycle]) || 0));
-      const grantedCT = isCtEligible ? Math.min(requestedCT, remainingCTBalance) : 0;
+      const grantedCT = isCtEligible ? Math.min(cfgTgt.requestedCT, remainingCTBalance) : 0;
       remainingCTBalance -= grantedCT;
 
       const queue = [];
@@ -217,9 +271,8 @@
       const offDaysCount = departedAfterDay5 ? 2 : 1;
       const totalHomeDays = offDaysCount + cUsed + grantedCT;
       const leaveEndDate = addDays(departDate, totalHomeDays - 1);
-      const returnSiteDate = addDays(leaveEndDate, state.grayBoxMode === 'trv' ? 2 : 1);
+      const returnSiteDate = addDays(leaveEndDate, cfgTgt.grayMode === 'trv' ? 2 : 1);
 
-      // Scan national/joint holidays overlapping this leave period
       const holidaysInLeave = [];
       for (let i = 0; i < totalHomeDays; i++) {
         const d = addDays(departDate, i);
@@ -229,6 +282,9 @@
 
       const cycleRecord = {
         cycle,
+        isLocked: cfgTgt.isLocked,
+        departureMode: cfgTgt.depMode,
+        grayBoxMode: cfgTgt.grayMode,
         siteStart: currentSiteStart || startDate,
         siteEnd: addDays(departDate, -1),
         departDate,
@@ -252,10 +308,9 @@
         ticketSeq,
         ticketQuota,
         ticketYear: leaveYear,
-        isCompanyTicket,
-        ticketLabel: isCompanyTicket
-          ? `${CFG.labels.ticketCompany} (${ticketSeq}/${ticketQuota})`
-          : `${CFG.labels.ticketSelf} (ke-${ticketSeq})`
+        ticketType,
+        isCompanyTicket: ticketType === 'company',
+        ticketLabel
       };
       cycles.push(cycleRecord);
       currentCycleObj = cycleRecord;
@@ -280,7 +335,6 @@
       return { type: ov.type, note: ov.note || '', spec: CFG.overrideTypes[ov.type] };
     }
 
-    // Iterate day by day
     let cur = startDate < windowStart ? new Date(startDate) : new Date(windowStart);
 
     while (cur < startDate && cur <= windowEnd) {
@@ -314,7 +368,7 @@
           tcBankSnap: tcBank
         });
         if (leaveQueue.length === 0) {
-          if (state.grayBoxMode === 'trv') phase = 'POST_LEAVE';
+          if (activeCycleGrayMode === 'trv') phase = 'POST_LEAVE';
           else resetForNextCycle();
         }
         cur = addDays(cur, 1);
@@ -342,7 +396,6 @@
       // PHASE === 'SITE'
       const tgt = getCycleTargets(cycle, tcBank);
 
-      // Shared handler for Day 6 (TC Candidate Day)
       function handleTcCandidateDay() {
         if (ov && !ov.spec.countsAsWork) {
           siteDayCounter += 1;
@@ -356,7 +409,7 @@
 
         if (weekWorkDays >= minWorkPerWeek) {
           const isFinalForAfter5 = tcEarned === tgt.tcGoalBeforeDepart;
-          if (!ov && isFinalForAfter5 && state.departureMode === 'leave_after_day5') {
+          if (!ov && isFinalForAfter5 && tgt.depMode === 'leave_after_day5') {
             leaveQueue = registerCycleLeave(new Date(cur), tcEarned, true);
             cellMap.set(iso, {
               date: new Date(cur), iso, kind: 'offDepart', code: CFG.codes.off,
@@ -367,8 +420,8 @@
           } else {
             siteDayCounter += 1;
             tcEarned += 1;
-            const isLastTc = (state.departureMode === 'work_day6' && tcEarned >= tgt.tcGoalWork6)
-              || (ov && state.departureMode === 'leave_after_day5' && tcEarned >= tgt.tcGoalWork6);
+            const isLastTc = (tgt.depMode === 'work_day6' && tcEarned >= tgt.tcGoalWork6)
+              || (ov && tgt.depMode === 'leave_after_day5' && tcEarned >= tgt.tcGoalWork6);
             if (isLastTc) {
               leaveQueue = registerCycleLeave(addDays(cur, 1), tcEarned, false);
               phase = 'LEAVE';
@@ -388,7 +441,6 @@
             });
           }
         } else {
-          // Partial week (< 5 work days) -> regular work day (or override), NO TC!
           if (!currentSiteStart) currentSiteStart = new Date(cur);
           const prevW = weekWorkDays;
           siteDayCounter += 1;
@@ -408,7 +460,6 @@
         }
       }
 
-      // Shared handler for regular work day (Days 1..5)
       function handleRegularWorkDay() {
         if (!currentSiteStart) currentSiteStart = new Date(cur);
         siteDayCounter += 1;
@@ -476,7 +527,6 @@
       cur = addDays(cur, 1);
     }
 
-    // Aggregate totals within 12-month window
     const totals = {
       work: 0, tc: 0, off: 0, leave: 0, annualLeave: 0, postLeaveGap: 0,
       overrides: 0, holidaysOnWork: 0
@@ -524,8 +574,8 @@
     });
 
     const totalCTUsed = cycles.reduce((sum, c) => sum + c.ctDaysCount, 0);
-    const companyTicketsUsed = cycles.filter(c => c.isCompanyTicket).length;
-    const selfTicketsUsed = cycles.filter(c => !c.isCompanyTicket).length;
+    const companyTicketsUsed = cycles.filter(c => c.ticketType === 'company').length;
+    const selfTicketsUsed = cycles.filter(c => c.ticketType === 'self').length;
     const endingTcBank = phase === 'SITE' ? (tcBank + tcEarned) : tcBank;
 
     return {
@@ -536,6 +586,8 @@
       startDate,
       joinDate,
       ctEligibleDate,
+      pohSpec,
+      ticketQuota,
       totalCTUsed,
       remainingCTBalance,
       initialTcBalance: clampInt(state.initialTcBalance, 0, 30, 0),
@@ -554,6 +606,30 @@
     setText('appSubtitle', `${CFG.app.companyName} — ${CFG.app.subtitle}`);
     setText('printCompanyTitle', `${CFG.app.companyName} — Jadwal Simulasi Roster & Cuti`);
     setText('printSubtitle', CFG.app.subtitle);
+
+    // Populate Grade dropdown
+    const gradeSelect = document.getElementById('inputGrade');
+    if (gradeSelect) {
+      gradeSelect.innerHTML = '';
+      (CFG.employeeGrades || ['Non-Staff', 'Staff', 'SPV / Manager']).forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g;
+        opt.textContent = g;
+        gradeSelect.appendChild(opt);
+      });
+    }
+
+    // Populate POH Category dropdown
+    const pohSelect = document.getElementById('inputPohCategory');
+    if (pohSelect && CFG.pohRules) {
+      pohSelect.innerHTML = '';
+      Object.entries(CFG.pohRules).forEach(([k, spec]) => {
+        const opt = document.createElement('option');
+        opt.value = k;
+        opt.textContent = spec.label;
+        pohSelect.appendChild(opt);
+      });
+    }
 
     const offSelect = document.getElementById('inputOffDay');
     if (offSelect) {
@@ -588,7 +664,7 @@
     setText('labelDepartWork6', CFG.labels.departureModes.work_day6.replace(/TC/g, CFG.codes.tc).replace(/\bC\b/g, CFG.codes.leave));
     setText('labelDepartAfter5', CFG.labels.departureModes.leave_after_day5.replace(/OFF/g, CFG.codes.off).replace(/\bC\b/g, CFG.codes.leave));
     setText('labelStartX1', `Mulai Kerja (${CFG.codes.work}1) di Site`);
-    setText('labelMinDaysHint', `Kunci minimal SOP: ${CFG.rules.minHomeLeaveDays} hari. Tiap periode bisa di-custom di tabel bawah.`);
+    setText('labelMinDaysHint', `Kunci minimal SOP: ${CFG.rules.minHomeLeaveDays} hari. Periode yg dikunci 🔒 tidak berubah saat default diganti.`);
 
     const presetContainer = document.getElementById('presetRow');
     if (presetContainer) {
@@ -652,7 +728,10 @@
   function syncFormInputs() {
     setVal('inputName', state.employeeName);
     setVal('inputNik', state.employeeNik);
+    setVal('inputGrade', state.employeeGrade);
     setVal('inputRole', state.employeeRole);
+    setVal('inputPohCategory', state.pohCategory);
+    setVal('inputPohCity', state.pohCity);
     setVal('inputJoinDate', state.joinDate);
     setVal('inputStartDate', state.startDate);
     setVal('inputHomeDays', state.targetHomeDays);
@@ -694,9 +773,16 @@
     setText('kpiCtVal', `${sim.totalCTUsed} hr`);
     setText('kpiCtSub', `Sisa saldo: ${sim.remainingCTBalance} hr`);
 
-    setText('kpiTicketLabel', 'Kuota Tiket');
-    setText('kpiTicketVal', `${sim.companyTicketsUsed} / ${CFG.rules.companyTicketQuotaPerYear}`);
-    setText('kpiTicketSub', sim.selfTicketsUsed > 0 ? `+ ${sim.selfTicketsUsed} ${CFG.labels.ticketSelf}` : `Semua ${CFG.labels.ticketCompany}`);
+    setText('kpiTicketLabel', `Hak Tiket (${sim.pohSpec.shortLabel || 'P.O.H'})`);
+    if (sim.ticketQuota === 0) {
+      setText('kpiTicketVal', 'Non-Tiket');
+      setText('kpiTicketSub', `${sim.pohSpec.shortLabel} • ${state.pohCity || 'Lokal'}`);
+    } else {
+      setText('kpiTicketVal', `${sim.companyTicketsUsed} / ${sim.ticketQuota}`);
+      setText('kpiTicketSub', sim.selfTicketsUsed > 0
+        ? `+ ${sim.selfTicketsUsed} ${sim.pohSpec.selfTicketLabel || CFG.labels.ticketSelf}`
+        : `POH: ${state.pohCity || sim.pohSpec.shortLabel}`);
+    }
 
     setText('kpiServiceLabel', 'Status Hak CT');
     if (!sim.joinDate) {
@@ -722,20 +808,28 @@
       }
     }
 
+    const pohHint = document.getElementById('pohRuleHint');
+    if (pohHint) {
+      pohHint.className = sim.ticketQuota === 0 ? 'field-hint' : 'field-hint ok';
+      pohHint.textContent = sim.ticketQuota === 0
+        ? `Aturan P.O.H Aktif: ${sim.pohSpec.label} — tidak memakai kuota tiket perusahaan.`
+        : `Aturan P.O.H Aktif: ${sim.pohSpec.label} (${state.pohCity || '-'}) — kuota ${sim.ticketQuota}×/tahun.`;
+    }
+
     const printBar = document.getElementById('printEmpBar');
     if (printBar) {
       const offLabel = state.offDay === 'auto' ? 'Otomatis 5:2' : `Tetap ${CFG.labels.dayNamesFull[Number(state.offDay)]}`;
       const depLabel = state.departureMode === 'work_day6' ? 'Kerja Hari ke-6' : 'Pulang stlh Hari ke-5';
-      const ovCount = Object.keys(state.manualOverrides || {}).length;
+      const lockedCount = Object.keys(state.lockedCycles || {}).length;
       printBar.innerHTML = `
         <div><strong>Nama:</strong> ${escapeHtml(state.employeeName || '-')}</div>
-        <div><strong>NIK:</strong> ${escapeHtml(state.employeeNik || '-')}</div>
+        <div><strong>NIK / Level:</strong> ${escapeHtml(state.employeeNik || '-')} (${escapeHtml(state.employeeGrade || '-')})</div>
         <div><strong>Jabatan:</strong> ${escapeHtml(state.employeeRole || '-')}</div>
+        <div><strong>P.O.H:</strong> ${escapeHtml(sim.pohSpec.shortLabel || '-')} — ${escapeHtml(state.pohCity || '-')}</div>
         <div><strong>Join Date:</strong> ${formatDateID(sim.joinDate, true)}</div>
         <div><strong>Mulai ${escapeHtml(c.work)}1:</strong> ${formatDateID(sim.startDate, true)}</div>
-        <div><strong>Saldo Awal TC:</strong> ${sim.initialTcBalance} hr (Akhir: ${sim.endingTcBank})</div>
-        <div><strong>Hari ${escapeHtml(c.off)} / Pulang:</strong> ${escapeHtml(offLabel)} / ${escapeHtml(depLabel)}</div>
-        <div><strong>Override Manual:</strong> ${ovCount} tanggal</div>
+        <div><strong>Saldo TC:</strong> Awal ${sim.initialTcBalance} / Akhir ${sim.endingTcBank} hr</div>
+        <div><strong>${escapeHtml(c.off)} / Pulang:</strong> ${escapeHtml(offLabel)} / ${escapeHtml(depLabel)}${lockedCount ? ` (${lockedCount} dikunci)` : ''}</div>
       `;
     }
   }
@@ -878,7 +972,6 @@
       </div>
     `;
 
-    // Bind override chips
     bar.querySelectorAll('[data-ov-type]').forEach(btn => {
       btn.addEventListener('click', () => {
         const t = btn.dataset.ovType;
@@ -919,10 +1012,15 @@
     }
 
     tbody.innerHTML = sim.cycles.map(cyc => {
-      const ticketHtml = cyc.isCompanyTicket
-        ? `<span class="pill pill-company">${escapeHtml(cyc.ticketLabel)}</span>`
-        : `<span class="pill pill-self">${escapeHtml(cyc.ticketLabel)}</span>`;
+      const pillClass = cyc.ticketType === 'local'
+        ? 'pill-local'
+        : (cyc.ticketType === 'company' ? 'pill-company' : 'pill-self');
+      const ticketHtml = `
+        <span class="pill ${pillClass}">${escapeHtml(cyc.ticketLabel)}</span>
+        <div class="poh-route-meta">POH: ${escapeHtml(state.pohCity || sim.pohSpec.shortLabel || '-')}</div>
+      `;
 
+      const disAttr = cyc.isLocked ? 'disabled' : '';
       let ctControlHtml = '';
       if (!sim.joinDate) ctControlHtml = `<span class="pill pill-locked">Isi Join Date</span>`;
       else if (!cyc.isCtEligible) ctControlHtml = `<span class="pill pill-locked" title="Aktif mulai ${escapeHtml(formatDateID(cyc.ctEligibleDate, true))}">Terkunci (&lt; 1 thn)</span>`;
@@ -930,9 +1028,9 @@
         const maxForThis = cyc.ctDaysCount + sim.remainingCTBalance;
         ctControlHtml = `
           <div class="ct-stepper">
-            <button type="button" data-ct-dec="${cyc.cycle}" ${cyc.ctDaysCount <= 0 ? 'disabled' : ''}>−</button>
-            <input type="number" min="0" max="${maxForThis}" value="${cyc.ctDaysCount}" data-ct-input="${cyc.cycle}" />
-            <button type="button" data-ct-inc="${cyc.cycle}" ${sim.remainingCTBalance <= 0 ? 'disabled' : ''}>+</button>
+            <button type="button" data-ct-dec="${cyc.cycle}" ${cyc.isLocked || cyc.ctDaysCount <= 0 ? 'disabled' : ''}>−</button>
+            <input type="number" min="0" max="${maxForThis}" value="${cyc.ctDaysCount}" data-ct-input="${cyc.cycle}" ${disAttr} />
+            <button type="button" data-ct-inc="${cyc.cycle}" ${cyc.isLocked || sim.remainingCTBalance <= 0 ? 'disabled' : ''}>+</button>
           </div>`;
       }
 
@@ -944,10 +1042,17 @@
       const breakdown = `${cyc.offDaysCount} ${c.off} + ${cyc.cDaysCount} ${c.leave}${cyc.ctDaysCount > 0 ? ` + ${cyc.ctDaysCount} ${c.annualLeave}` : ''}`;
 
       return `
-        <tr>
+        <tr class="${cyc.isLocked ? 'cycle-locked' : ''}">
           <td>
-            <strong>Periode ${cyc.cycle}</strong>
-            ${cyc.hasCustomDays ? '<span class="badge-custom">Custom</span>' : ''}
+            <div>
+              <strong>Periode ${cyc.cycle}</strong>
+              ${cyc.hasCustomDays ? '<span class="badge-custom">Custom</span>' : ''}
+              ${cyc.isLocked ? '<span class="badge-locked-print">Terkunci</span>' : ''}
+            </div>
+            <button type="button" class="btn-lock${cyc.isLocked ? ' locked' : ''}" data-lock-toggle="${cyc.cycle}"
+              title="${cyc.isLocked ? 'Klik untuk membuka kunci periode ini agar bisa diedit kembali' : 'Kunci periode ini sebagai realisasi/history agar tidak berubah saat skema global diubah'}">
+              ${cyc.isLocked ? '🔒 Terkunci' : '🔓 Kunci Periode'}
+            </button>
             ${holBadge}
           </td>
           <td>${escapeHtml(formatDateID(cyc.siteStart, true))} – ${escapeHtml(formatDateID(cyc.siteEnd, true))}</td>
@@ -955,17 +1060,17 @@
           <td>${escapeHtml(formatDateID(cyc.leaveEndDate, true))}<br><span style="font-size:11px;color:#64748B;">Kembali ${escapeHtml(c.work)}1: ${escapeHtml(formatDateID(cyc.returnSiteDate, true))}</span></td>
           <td>
             <div class="ct-stepper">
-              <button type="button" data-dur-dec="${cyc.cycle}" ${cyc.targetHomeDays <= CFG.rules.minHomeLeaveDays ? 'disabled' : ''}>−</button>
-              <input type="number" min="${CFG.rules.minHomeLeaveDays}" max="${CFG.rules.maxHomeLeaveDays}" value="${cyc.targetHomeDays}" data-dur-input="${cyc.cycle}" />
-              <button type="button" data-dur-inc="${cyc.cycle}" ${cyc.targetHomeDays >= CFG.rules.maxHomeLeaveDays ? 'disabled' : ''}>+</button>
+              <button type="button" data-dur-dec="${cyc.cycle}" ${cyc.isLocked || cyc.targetHomeDays <= CFG.rules.minHomeLeaveDays ? 'disabled' : ''}>−</button>
+              <input type="number" min="${CFG.rules.minHomeLeaveDays}" max="${CFG.rules.maxHomeLeaveDays}" value="${cyc.targetHomeDays}" data-dur-input="${cyc.cycle}" ${disAttr} />
+              <button type="button" data-dur-inc="${cyc.cycle}" ${cyc.isLocked || cyc.targetHomeDays >= CFG.rules.maxHomeLeaveDays ? 'disabled' : ''}>+</button>
             </div>
             <div class="tc-flow-meta"><strong>Total: ${cyc.totalHomeDays} hr</strong> (${escapeHtml(breakdown)})</div>
           </td>
           <td>
             <div class="ct-stepper" title="Jumlah TC yang sengaja ditabung / dibawa ke periode berikutnya">
-              <button type="button" data-save-dec="${cyc.cycle}" ${cyc.saveTcRequested <= 0 ? 'disabled' : ''}>−</button>
-              <input type="number" min="0" max="20" value="${cyc.saveTcRequested}" data-save-input="${cyc.cycle}" />
-              <button type="button" data-save-inc="${cyc.cycle}">+</button>
+              <button type="button" data-save-dec="${cyc.cycle}" ${cyc.isLocked || cyc.saveTcRequested <= 0 ? 'disabled' : ''}>−</button>
+              <input type="number" min="0" max="20" value="${cyc.saveTcRequested}" data-save-input="${cyc.cycle}" ${disAttr} />
+              <button type="button" data-save-inc="${cyc.cycle}" ${disAttr}>+</button>
             </div>
             <div class="tc-flow-meta">Awal: ${cyc.tcCarryIn} • +${cyc.tcEarnedThisCycle} • Pakai: ${cyc.cDaysCount} • <strong>Sisa: ${cyc.tcCarryOut}</strong></div>
           </td>
@@ -975,8 +1080,34 @@
       `;
     }).join('');
 
+    // Bind Lock/Unlock buttons
+    tbody.querySelectorAll('[data-lock-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cycNum = Number(btn.dataset.lockToggle);
+        if (state.lockedCycles[cycNum]) {
+          delete state.lockedCycles[cycNum];
+          showToast(`Periode ${cycNum} dibuka kembali (dapat diubah).`);
+        } else {
+          const rec = sim.cycles.find(x => x.cycle === cycNum);
+          if (rec) {
+            state.lockedCycles[cycNum] = {
+              targetHomeDays: rec.targetHomeDays,
+              saveTc: rec.saveTcRequested,
+              ctDays: rec.ctDaysCount,
+              departureMode: rec.departureMode,
+              grayBoxMode: rec.grayBoxMode,
+              lockedAt: new Date().toISOString()
+            };
+            showToast(`Periode ${cycNum} dikunci (${rec.targetHomeDays} hari). Perubahan skema global tidak akan mengubah periode ini.`);
+          }
+        }
+        saveAndRender();
+      });
+    });
+
     // Bind Flexible Duration steppers
     const setCycleDur = (cyc, val) => {
+      if (state.lockedCycles[cyc]) return;
       const clamped = clampInt(val, CFG.rules.minHomeLeaveDays, CFG.rules.maxHomeLeaveDays, state.targetHomeDays);
       if (clamped === state.targetHomeDays) delete state.cycleHomeDays[cyc];
       else state.cycleHomeDays[cyc] = clamped;
@@ -998,6 +1129,7 @@
 
     // Bind Save/Carry-Over TC steppers
     const setCycleSave = (cyc, val) => {
+      if (state.lockedCycles[cyc]) return;
       const clamped = clampInt(val, 0, 20, 0);
       if (clamped === 0) delete state.cycleSaveTc[cyc];
       else state.cycleSaveTc[cyc] = clamped;
@@ -1018,16 +1150,20 @@
     // Bind CT steppers
     tbody.querySelectorAll('[data-ct-dec]').forEach(b => b.addEventListener('click', () => {
       const cyc = Number(b.dataset.ctDec);
+      if (state.lockedCycles[cyc]) return;
       state.ctAllocations[cyc] = Math.max(0, (Number(state.ctAllocations[cyc]) || 0) - 1);
       saveAndRender();
     }));
     tbody.querySelectorAll('[data-ct-inc]').forEach(b => b.addEventListener('click', () => {
       const cyc = Number(b.dataset.ctInc);
+      if (state.lockedCycles[cyc]) return;
       state.ctAllocations[cyc] = (Number(state.ctAllocations[cyc]) || 0) + 1;
       saveAndRender();
     }));
     tbody.querySelectorAll('[data-ct-input]').forEach(inp => inp.addEventListener('change', () => {
-      state.ctAllocations[Number(inp.dataset.ctInput)] = Math.max(0, Math.floor(Number(inp.value) || 0));
+      const cyc = Number(inp.dataset.ctInput);
+      if (state.lockedCycles[cyc]) return;
+      state.ctAllocations[cyc] = Math.max(0, Math.floor(Number(inp.value) || 0));
       saveAndRender();
     }));
   }
@@ -1037,12 +1173,13 @@
     const payload = {
       v: 2,
       n: state.employeeName, k: state.employeeNik, r: state.employeeRole,
+      gr: state.employeeGrade, pc: state.pohCategory, pct: state.pohCity,
       j: state.joinDate, s: state.startDate, h: state.targetHomeDays,
       o: state.offDay, d: state.departureMode, w: state.workCounterMode,
       g: state.grayBoxMode, vm: state.viewMode, sh: state.showHolidays ? 1 : 0,
       cb: state.annualLeaveBalance, tb: state.initialTcBalance,
       ct: state.ctAllocations, ch: state.cycleHomeDays,
-      cs: state.cycleSaveTc, ov: state.manualOverrides
+      cs: state.cycleSaveTc, lk: state.lockedCycles, ov: state.manualOverrides
     };
     const json = JSON.stringify(payload);
     const b64 = btoa(unescape(encodeURIComponent(json)))
@@ -1058,6 +1195,9 @@
       if (p.n !== undefined) state.employeeName = String(p.n);
       if (p.k !== undefined) state.employeeNik = String(p.k);
       if (p.r !== undefined) state.employeeRole = String(p.r);
+      if (p.gr !== undefined) state.employeeGrade = String(p.gr);
+      if (p.pc !== undefined) state.pohCategory = String(p.pc);
+      if (p.pct !== undefined) state.pohCity = String(p.pct);
       if (p.j !== undefined) state.joinDate = String(p.j);
       if (p.s !== undefined) state.startDate = String(p.s);
       if (p.h !== undefined) state.targetHomeDays = clampInt(p.h, CFG.rules.minHomeLeaveDays, CFG.rules.maxHomeLeaveDays, def.targetHomeDays);
@@ -1072,15 +1212,16 @@
       if (p.ct && typeof p.ct === 'object') state.ctAllocations = { ...p.ct };
       if (p.ch && typeof p.ch === 'object') state.cycleHomeDays = { ...p.ch };
       if (p.cs && typeof p.cs === 'object') state.cycleSaveTc = { ...p.cs };
+      if (p.lk && typeof p.lk === 'object') state.lockedCycles = { ...p.lk };
       if (p.ov && typeof p.ov === 'object') state.manualOverrides = { ...p.ov };
     } else {
-      // Raw full state JSON import
       Object.assign(state, p);
       state.targetHomeDays = clampInt(state.targetHomeDays, CFG.rules.minHomeLeaveDays, CFG.rules.maxHomeLeaveDays, def.targetHomeDays);
       state.initialTcBalance = clampInt(state.initialTcBalance, 0, 30, 0);
       state.ctAllocations = state.ctAllocations || {};
       state.cycleHomeDays = state.cycleHomeDays || {};
       state.cycleSaveTc = state.cycleSaveTc || {};
+      state.lockedCycles = state.lockedCycles || {};
       state.manualOverrides = state.manualOverrides || {};
     }
     return true;
@@ -1209,13 +1350,13 @@
 
       ws.mergeCells('A2:AJ2');
       const offLabel = state.offDay === 'auto' ? 'Otomatis 5:2' : `Tetap ${CFG.labels.dayNamesFull[Number(state.offDay)]}`;
-      ws.getCell('A2').value = `Nama: ${state.employeeName} | NIK: ${state.employeeNik} | Jabatan: ${state.employeeRole} | Mulai ${c.work}1: ${formatDateID(sim.startDate, true)} | Saldo Awal TC: ${sim.initialTcBalance} | Hari ${c.off}: ${offLabel}`;
+      ws.getCell('A2').value = `Nama: ${state.employeeName} | NIK: ${state.employeeNik} (${state.employeeGrade}) | Jabatan: ${state.employeeRole} | P.O.H: ${sim.pohSpec.shortLabel} (${state.pohCity || '-'}) | Mulai ${c.work}1: ${formatDateID(sim.startDate, true)}`;
       ws.getCell('A2').font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF334155' } };
       ws.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
       ws.getRow(2).height = 20;
 
       ws.mergeCells('A3:AJ3');
-      ws.getCell('A3').value = `Tgl Merah Kerja: ${sim.totals.holidaysOnWork} hr | Override Manual: ${sim.totals.overrides} hr | Sisa Saldo ${c.annualLeave}: ${sim.remainingCTBalance} hr | Sisa Akhir ${c.tc}: ${sim.endingTcBank} hr`;
+      ws.getCell('A3').value = `Hari ${c.off}: ${offLabel} | Saldo Awal ${c.tc}: ${sim.initialTcBalance} (Akhir: ${sim.endingTcBank}) | Sisa ${c.annualLeave}: ${sim.remainingCTBalance} hr | Tgl Merah Kerja: ${sim.totals.holidaysOnWork} hr | Override: ${sim.totals.overrides} hr`;
       ws.getCell('A3').font = { name: 'Calibri', size: 9.5, color: { argb: 'FF475569' } };
       ws.getRow(3).height = 18;
       ws.getRow(4).height = 6;
@@ -1251,9 +1392,9 @@
             color: { argb: hexToArgb(colSpec.text) }
           };
           ec.alignment = { vertical: 'middle', horizontal: 'center' };
-          const borderColor = (state.showHolidays && cellData.holiday && cellData.holiday.type === 'national') ? 'FFDC2626' : 'FFE2E8F0';
+          const isNatHol = state.showHolidays && cellData.holiday && cellData.holiday.type === 'national';
           ec.border = {
-            top: { style: borderColor === 'FFDC2626' ? 'medium' : 'thin', color: { argb: borderColor } },
+            top: { style: isNatHol ? 'medium' : 'thin', color: { argb: isNatHol ? 'FFDC2626' : 'FFE2E8F0' } },
             bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
             left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
             right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
@@ -1289,10 +1430,11 @@
       for (let col = 2; col <= 32; col++) ws.getColumn(col).width = 5.5;
       for (let col = 33; col <= 36; col++) ws.getColumn(col).width = 6.2;
 
-      // SHEET 2: RINGKASAN PERIODE CUTI + CARRY-OVER
+      // SHEET 2: RINGKASAN PERIODE CUTI + LOCK + CARRY-OVER + POH
       const ws2 = wb.addWorksheet('Ringkasan Periode Cuti');
       ws2.columns = [
-        { header: 'Periode', key: 'periode', width: 12 },
+        { header: 'Periode', key: 'periode', width: 13 },
+        { header: 'Status', key: 'status', width: 12 },
         { header: 'Kerja di Site', key: 'site', width: 25 },
         { header: 'Berangkat', key: 'depart', width: 20 },
         { header: 'Akhir Cuti', key: 'end', width: 16 },
@@ -1303,8 +1445,8 @@
         { header: 'TC Sisa', key: 'tcOut', width: 10 },
         { header: `Hari ${c.annualLeave}`, key: 'ct', width: 10 },
         { header: 'Total Rumah', key: 'total', width: 13 },
-        { header: 'Irisan Libur Nasional', key: 'hol', width: 28 },
-        { header: 'Status Tiket', key: 'ticket', width: 24 }
+        { header: 'Irisan Libur Nasional', key: 'hol', width: 26 },
+        { header: 'P.O.H & Status Tiket', key: 'ticket', width: 32 }
       ];
       ws2.getRow(1).eachCell(cell => {
         cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -1313,6 +1455,7 @@
       sim.cycles.forEach(cyc => {
         ws2.addRow({
           periode: `Periode ${cyc.cycle}`,
+          status: cyc.isLocked ? 'Terkunci' : 'Proyeksi',
           site: `${formatDateID(cyc.siteStart, true)} – ${formatDateID(cyc.siteEnd, true)}`,
           depart: `${CFG.labels.dayNamesShort[cyc.departDate.getDay()]}, ${formatDateID(cyc.departDate, true)}`,
           end: formatDateID(cyc.leaveEndDate, true),
@@ -1320,7 +1463,7 @@
           tcIn: cyc.tcCarryIn, tcEarn: cyc.tcEarnedThisCycle, c: cyc.cDaysCount,
           tcOut: cyc.tcCarryOut, ct: cyc.ctDaysCount, total: cyc.totalHomeDays,
           hol: cyc.holidaysInLeave.map(h => h.name).join('; ') || '-',
-          ticket: cyc.ticketLabel
+          ticket: `${cyc.ticketLabel} [${state.pohCity || sim.pohSpec.shortLabel}]`
         });
       });
 
@@ -1399,7 +1542,7 @@
     try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (_) {}
     syncFormInputs();
     renderAll();
-    showToast('Semua pengaturan, override, dan durasi custom di-reset ke default config.js.');
+    showToast('Semua pengaturan, kunci periode, override, dan durasi custom di-reset ke default config.js.');
   }
 
   function renderAll() {
@@ -1427,13 +1570,26 @@
 
     bindInput('inputName', 'employeeName');
     bindInput('inputNik', 'employeeNik');
+    bindInput('inputGrade', 'employeeGrade');
     bindInput('inputRole', 'employeeRole');
+    bindInput('inputPohCity', 'pohCity');
     bindInput('inputJoinDate', 'joinDate');
     bindInput('inputStartDate', 'startDate');
     bindInput('inputOffDay', 'offDay');
     bindInput('inputCounterMode', 'workCounterMode');
     bindInput('inputGrayMode', 'grayBoxMode');
     bindInput('inputViewMode', 'viewMode');
+
+    // POH Category auto-suggests default city if city is blank or matches another default
+    document.getElementById('inputPohCategory')?.addEventListener('change', (e) => {
+      const prevSpec = getPohSpec();
+      state.pohCategory = e.target.value;
+      const nextSpec = getPohSpec();
+      if (!state.pohCity || state.pohCity === prevSpec.defaultCity) {
+        state.pohCity = nextSpec.defaultCity || '';
+      }
+      saveAndRender();
+    });
 
     document.getElementById('inputHomeDays')?.addEventListener('change', (e) => {
       const minD = CFG.rules.minHomeLeaveDays, maxD = CFG.rules.maxHomeLeaveDays;
@@ -1468,24 +1624,30 @@
     document.getElementById('btnPrintPdf')?.addEventListener('click', () => window.print());
     document.getElementById('btnShareLink')?.addEventListener('click', copyShareLink);
 
-    // Clear buttons
+    // Clear buttons (respect locked cycles!)
     document.getElementById('btnClearOverrides')?.addEventListener('click', () => {
       state.manualOverrides = {};
       saveAndRender();
       showToast('Semua override manual telah dihapus.');
     });
 
+    document.getElementById('btnUnlockAll')?.addEventListener('click', () => {
+      state.lockedCycles = {};
+      saveAndRender();
+      showToast('Semua kunci periode telah dibuka.');
+    });
+
     document.getElementById('btnClearCycleCustom')?.addEventListener('click', () => {
       state.cycleHomeDays = {};
       state.cycleSaveTc = {};
       saveAndRender();
-      showToast('Durasi custom & simpan TC per periode dikembalikan ke default.');
+      showToast('Durasi custom & simpan TC pada periode yang tidak dikunci dikembalikan ke default.');
     });
 
     document.getElementById('btnClearCT')?.addEventListener('click', () => {
       state.ctAllocations = {};
       saveAndRender();
-      showToast(`Alokasi ${CFG.codes.annualLeave} pada semua periode di-reset ke 0.`);
+      showToast(`Alokasi ${CFG.codes.annualLeave} pada periode yang tidak dikunci di-reset ke 0.`);
     });
 
     // Config Modal
@@ -1512,10 +1674,12 @@
       const name = (inp?.value || '').trim() || `Skenario ${state.employeeName} (${toISODate(new Date())})`;
       const list = getSavedScenarios();
       const ovCount = Object.keys(state.manualOverrides || {}).length;
+      const lkCount = Object.keys(state.lockedCycles || {}).length;
+      const pohShort = getPohSpec().shortLabel || state.pohCategory;
       list.unshift({
         name,
         savedAt: new Date().toISOString(),
-        meta: `Mulai ${state.startDate} • Default ${state.targetHomeDays} hr • TC Awal ${state.initialTcBalance} • ${ovCount} override`,
+        meta: `${pohShort} • Mulai ${state.startDate} • Default ${state.targetHomeDays} hr • ${lkCount} dikunci • ${ovCount} override`,
         data: JSON.parse(JSON.stringify(state))
       });
       setSavedScenarios(list.slice(0, 20));

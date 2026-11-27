@@ -19,7 +19,7 @@
         <div class="brand-mark">KAN</div>
         <div>
           <h1 class="brand-title" id="appTitle">KAN Timesheet &amp; Leave Simulator</h1>
-          <p class="brand-subtitle" id="appSubtitle">Simulasi Roster 5:2, Carry-Over TC, &amp; Kuota Tiket</p>
+          <p class="brand-subtitle" id="appSubtitle">Simulasi Roster 5:2, P.O.H, Kunci Periode, Carry-Over TC &amp; Kuota Tiket</p>
         </div>
       </div>
 
@@ -65,10 +65,10 @@
     <!-- CONTROLS PANEL (3 CARDS) -->
     <section class="controls-grid no-print">
 
-      <!-- CARD 1: PROFIL & MASA KERJA -->
+      <!-- CARD 1: PROFIL, P.O.H & SALDO AWAL -->
       <div class="card">
         <div class="card-header">
-          <h2 class="card-title"><span class="step-badge">1</span> Profil Karyawan &amp; Saldo Awal</h2>
+          <h2 class="card-title"><span class="step-badge">1</span> Profil Karyawan, P.O.H &amp; Saldo</h2>
         </div>
         <div class="form-grid">
           <div class="field span-2">
@@ -80,8 +80,20 @@
             <input type="text" id="inputNik" placeholder="KAN-2025-XXXX" />
           </div>
           <div class="field">
+            <label for="inputGrade">Kategori Jabatan</label>
+            <select id="inputGrade"></select>
+          </div>
+          <div class="field span-2">
             <label for="inputRole">Jabatan / Divisi</label>
             <input type="text" id="inputRole" placeholder="Asisten / Staff Site" />
+          </div>
+          <div class="field">
+            <label for="inputPohCategory">Kategori P.O.H</label>
+            <select id="inputPohCategory"></select>
+          </div>
+          <div class="field">
+            <label for="inputPohCity">Kota / Bandara P.O.H</label>
+            <input type="text" id="inputPohCity" placeholder="Misal: Surabaya (SUB)" />
           </div>
           <div class="field">
             <label for="inputJoinDate">Tanggal Masuk (Join Date)</label>
@@ -92,9 +104,8 @@
             <input type="number" id="inputCtBalance" min="0" max="60" step="1" />
           </div>
           <div class="field span-2">
-            <label for="inputInitialTc">Saldo Awal TC (Carry-Over Siklus/Tahun Lalu)</label>
+            <label for="inputInitialTc">Saldo Awal TC (Carry-Over Periode Lalu)</label>
             <input type="number" id="inputInitialTc" min="0" max="30" step="1" />
-            <div class="field-hint">Tabungan TC bawaan sebelum mulai X1. Otomatis mengurangi jumlah minggu kerja untuk pulang lebih cepat atau ditabung lagi.</div>
           </div>
           <div class="field span-2">
             <div class="field-hint" id="joinDateHint"></div>
@@ -119,11 +130,14 @@
           <div class="field span-2">
             <label>Preset Durasi Cuti Default</label>
             <div class="preset-row" id="presetRow"></div>
-            <div class="field-hint" id="labelMinDaysHint">Kunci minimal SOP: 9 hari. Durasi tiap periode juga bisa diubah berbeda di tabel bawah.</div>
+            <div class="field-hint" id="labelMinDaysHint">Kunci minimal SOP: 9 hari. Durasi tiap periode juga bisa diubah berbeda &amp; dikunci di tabel bawah.</div>
           </div>
           <div class="field span-2">
             <label for="inputOffDay">Hari OFF Mingguan Departemen</label>
             <select id="inputOffDay"></select>
+          </div>
+          <div class="field span-2">
+            <div class="field-hint" id="pohRuleHint"></div>
           </div>
         </div>
       </div>
@@ -231,11 +245,14 @@
       <div class="inspector-bar no-print" id="inspectorBar"></div>
     </section>
 
-    <!-- CYCLES SUMMARY, CARRY-OVER TC & ANNUAL LEAVE ALLOCATOR -->
+    <!-- CYCLES SUMMARY, LOCK PERIODE, CARRY-OVER TC & ANNUAL LEAVE ALLOCATOR -->
     <section class="card">
       <div class="card-header" style="flex-wrap:wrap;">
-        <h2 class="card-title">Ringkasan Periode Cuti, Durasi Fleksibel, Carry-Over TC &amp; Alokasi CT</h2>
+        <h2 class="card-title">Ringkasan Periode Cuti, Kunci History, Durasi Fleksibel, Carry-Over TC &amp; CT</h2>
         <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost" id="btnUnlockAll" style="font-size:11.5px;padding:4px 8px;">
+            🔓 Buka Semua Kunci
+          </button>
           <button type="button" class="btn btn-ghost" id="btnClearCycleCustom" style="font-size:11.5px;padding:4px 8px;">
             Reset Durasi &amp; Simpan TC
           </button>
@@ -249,14 +266,14 @@
         <table class="cycles-table">
           <thead>
             <tr>
-              <th>Periode</th>
+              <th>Periode &amp; Kunci</th>
               <th>Rentang Kerja di Site</th>
               <th>Tanggal Berangkat</th>
               <th>Akhir Cuti &amp; Kembali</th>
               <th>Durasi di Rumah (Fleksibel)</th>
               <th>Carry-Over / Simpan TC</th>
               <th>Tambah CT</th>
-              <th>Status Tiket</th>
+              <th>Status Tiket / P.O.H</th>
             </tr>
           </thead>
           <tbody id="cyclesTbody"></tbody>
@@ -270,7 +287,7 @@
     </section>
 
     <footer class="footer-note no-print">
-      KAN Timesheet Simulator v2.0 • Ubah kode, SOP, hari libur nasional, dan aturan override di <code>config.js</code> tanpa menyentuh kode inti.
+      KAN Timesheet Simulator v2.0 • Ubah kode, SOP, P.O.H, tanda tangan, hari libur nasional, dan aturan override di <code>config.js</code> tanpa menyentuh kode inti.
     </footer>
 
   </main>
@@ -286,7 +303,7 @@
         <div class="scenario-section">
           <label class="scenario-label" for="inputScenarioName">Simpan Skenario Aktif ke Browser</label>
           <div class="scenario-save-row">
-            <input type="text" id="inputScenarioName" placeholder="Misal: Skenario A - Pulang Lebaran 2026" />
+            <input type="text" id="inputScenarioName" placeholder="Misal: Budi Santoso - P1 9hr (Kunci) + P2 11hr" />
             <button type="button" class="btn btn-primary" id="btnSaveScenario">Simpan</button>
           </div>
         </div>
@@ -305,7 +322,7 @@
             <input type="file" id="inputImportJsonFile" accept=".json,application/json" style="display:none;" />
           </div>
           <p style="margin:8px 0 0;font-size:11.5px;color:#64748B;">
-            File JSON dan Link Bagikan menyimpan seluruh profil, carry-over TC, durasi custom tiap periode, alokasi CT, dan override manual (S/I/DL/A).
+            File JSON dan Link Bagikan menyimpan profil + P.O.H, periode yang dikunci, carry-over TC, durasi custom tiap periode, alokasi CT, dan override manual (S/I/DL/A).
           </p>
         </div>
       </div>
