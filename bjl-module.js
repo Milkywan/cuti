@@ -295,8 +295,8 @@
       let trvDepartDays = trvSpec.trvDepart;
       let trvReturnDays = trvSpec.trvReturn;
       if (trvSpec.trvDays === 1) {
-        if (state.trv1Placement === 'return') { trvDepartDays = 0; trvReturnDays = 1; }
-        else { trvDepartDays = 1; trvReturnDays = 0; }
+        if (state.trv1Placement === 'return') { trvDepartDays = 1; trvReturnDays = 1; }
+        else { trvDepartDays = 1; trvReturnDays = 1; }
       }
 
       const siteStart = new Date(curDate.getTime());
