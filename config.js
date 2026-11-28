@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * MULTI-COMPANY TIMESHEET & LEAVE SIMULATOR — CONFIGURATION (config.js v3.0)
+ * MULTI-COMPANY TIMESHEET & LEAVE SIMULATOR — CONFIGURATION (config.js v3.1)
  * ============================================================================
  * Mendukung 2 Entitas Perusahaan:
  *   1. PT Kalimantan Agro Nusantara (KAN) — Roster 5:2, TC, Carry-Over & POH
@@ -347,7 +347,7 @@ window.KAN_CONFIG = {
 
 // Update versi KAN ke 3.0.0 agar sinkron
 if (window.KAN_CONFIG && window.KAN_CONFIG.app) {
-  window.KAN_CONFIG.app.version = '3.0.0';
+  window.KAN_CONFIG.app.version = '3.1.0';
 }
 
 window.BJL_CONFIG = {
@@ -357,8 +357,10 @@ window.BJL_CONFIG = {
     "companyName": "PT Baja Jaya Lestari (BJL)",
     "siteLocation": "Smelter Site Kawasi (Pulau Obi)",
     "sopRef": "BJL-H-SOP-HRGA-005T (Rev.0)",
-    "version": "3.0.0"
+    "version": "3.1.0"
   },
+  "maxExtendSopDays": 42,
+  "maxExtendInputDays": 90,
   "codes": {
     "work": "X",
     "off": "OFF",
@@ -398,25 +400,26 @@ window.BJL_CONFIG = {
   },
   "workPatterns": {
     "13:1": {
-      "label": "Pola 13:1 (13 Kerja, 1 OFF Site)",
+      "label": "Pola 13:1 (13 Hari Kerja : 1 Hari OFF — Siklus 14 Hr)",
       "workDays": 13,
       "offDays": 1
     },
     "6:1": {
-      "label": "Pola 6:1 (6 Kerja, 1 OFF Site)",
+      "label": "Pola 6:1 (6 Hari Kerja : 1 Hari OFF — Siklus 7 Hr)",
       "workDays": 6,
       "offDays": 1
     },
     "2:1": {
-      "label": "Pola 2:1 (2 Kerja, 1 OFF Site)",
+      "label": "Pola 2:1 (2 Hari Kerja : 1 Hari OFF — Siklus 3 Hr)",
       "workDays": 2,
       "offDays": 1
     }
   },
   "trvZones": {
     "halsel_malut": {
-      "label": "POH Halsel Malut (TRV 0 — Tanpa Tiket Pesawat)",
+      "label": "POH Halsel Malut (TRV 0 — 0 Hr Travel, Non-Pesawat)",
       "shortLabel": "Halsel Malut",
+      "trvCode": "TRV 0",
       "trvDays": 0,
       "trvDepart": 0,
       "trvReturn": 0,
@@ -424,17 +427,19 @@ window.BJL_CONFIG = {
       "ticketLabel": "Non-Tiket Pesawat (Darat/Laut Lokal)"
     },
     "malut_non_halsel": {
-      "label": "POH Malut Non-Halsel (TRV 1 — Tanpa Tiket Pesawat)",
+      "label": "POH Malut Non-Halsel (TRV 1 — 1 Brgkt + 1 Plg = 2 Hr PP, Non-Pesawat)",
       "shortLabel": "Malut Non-Halsel",
-      "trvDays": 1,
+      "trvCode": "TRV 1",
+      "trvDays": 2,
       "trvDepart": 1,
-      "trvReturn": 0,
+      "trvReturn": 1,
       "hasFlightTicket": false,
       "ticketLabel": "Non-Tiket Pesawat (Laut/Ferry Ternate)"
     },
     "non_malut": {
-      "label": "POH Non-Malut (TRV 2 — Dapat Tiket Pesawat)",
+      "label": "POH Non-Malut (TRV 2 — 1 Brgkt + 1 Plg = 2 Hr PP + Tiket Pesawat)",
       "shortLabel": "Non-Malut (Pesawat)",
+      "trvCode": "TRV 2",
       "trvDays": 2,
       "trvDepart": 1,
       "trvReturn": 1,
@@ -1874,28 +1879,39 @@ window.BJL_CONFIG = {
   "overrideTypes": {
     "sick": {
       "code": "S",
-      "label": "Sakit (Surat Dokter)",
-      "countsAsSite": false
+      "label": "Sakit (Surat Dokter — X Lanjut)",
+      "countsAsSite": true,
+      "resetsRosterX": false
+    },
+    "sickNoDoc": {
+      "code": "IS",
+      "label": "Ijin Sakit (Tanpa Surat Dokter — Reset X1)",
+      "countsAsSite": false,
+      "resetsRosterX": true
     },
     "permit": {
       "code": "I",
       "label": "Izin Resmi",
-      "countsAsSite": false
+      "countsAsSite": false,
+      "resetsRosterX": false
     },
     "duty": {
       "code": "DL",
       "label": "Dinas Luar / Training",
-      "countsAsSite": true
+      "countsAsSite": true,
+      "resetsRosterX": false
     },
     "alpha": {
       "code": "A",
       "label": "Mangkir / Alpha",
-      "countsAsSite": false
+      "countsAsSite": false,
+      "resetsRosterX": false
     },
     "customOff": {
       "code": "OFF*",
       "label": "OFF Manual / Tukar",
-      "countsAsSite": true
+      "countsAsSite": true,
+      "resetsRosterX": false
     }
   },
   "defaults": {
@@ -1906,8 +1922,7 @@ window.BJL_CONFIG = {
     "employeeGrade": "M3",
     "rosterCode": "X63",
     "workPattern": "13:1",
-    "siteCountMode": "calendar_site",
-    "trv1Placement": "depart",
+    "firstOffRefDate": "",
     "extraLeaveRounding": "round",
     "pohCity": "Surabaya",
     "joinDate": "2022-03-01",
@@ -1932,7 +1947,13 @@ window.BJL_CONFIG = {
       "bg": "#FEF3C7",
       "text": "#92400E",
       "border": "#FCD34D",
-      "label": "Kerja Extend / Tunda Cuti (Hitung CE)"
+      "label": "Extend On-Site (1–42 Hr, Hak CE)"
+    },
+    "extendOverSop": {
+      "bg": "#FEE2E2",
+      "text": "#991B1B",
+      "border": "#EF4444",
+      "label": "Extend >42 Hr (Peringatan Batas SOP)"
     },
     "trvDepart": {
       "bg": "#D1FAE5",
@@ -1980,7 +2001,13 @@ window.BJL_CONFIG = {
       "bg": "#FFE4E6",
       "text": "#9F1239",
       "border": "#FDA4AF",
-      "label": "Override: Sakit (S)"
+      "label": "Override: Sakit SKD (S — X Lanjut)"
+    },
+    "sickNoDoc": {
+      "bg": "#FDA4AF",
+      "text": "#881337",
+      "border": "#E11D48",
+      "label": "Override: Ijin Sakit Tanpa SKD (IS — Reset X1)"
     },
     "permit": {
       "bg": "#E0E7FF",
@@ -2078,7 +2105,7 @@ window.BJL_CONFIG.holidays = window.KAN_CONFIG.holidays;
 window.BJL_CONFIG.labels = window.KAN_CONFIG.labels;
 
 window.APP_CONFIG = {
-  version: '3.0.0',
+  version: '3.1.0',
   appName: 'Timesheet & Leave Simulator Suite',
   auth: {
     enabled: true,

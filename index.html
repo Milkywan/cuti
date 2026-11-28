@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Timesheet &amp; Leave Simulator Suite v3.0 — PT KAN &amp; PT BJL</title>
+  <title>Timesheet &amp; Leave Simulator Suite v3.1 — PT KAN &amp; PT BJL</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,7 +19,7 @@
         <div class="login-mark">TS3</div>
         <div>
           <h1>Timesheet &amp; Leave Simulator Suite</h1>
-          <p>Multi-Company HRGA Platform — PT KAN &amp; PT BJL (v3.0)</p>
+          <p>Multi-Company HRGA Platform — PT KAN &amp; PT BJL (v3.1)</p>
         </div>
       </div>
 
@@ -58,7 +58,7 @@
         <div class="brand">
           <div class="brand-mark" id="brandMark">BJL</div>
           <div>
-            <h1 class="brand-title" id="appTitle">Timesheet &amp; Leave Simulator <span class="version-pill">v3.0</span></h1>
+            <h1 class="brand-title" id="appTitle">Timesheet &amp; Leave Simulator <span class="version-pill">v3.1</span></h1>
             <p class="brand-subtitle" id="appSubtitle">PT Baja Jaya Lestari (BJL) — Roster Site, Cuti &amp; Lumpsum</p>
           </div>
         </div>
@@ -119,7 +119,7 @@
             <p>Smelter Site Kawasi (Pulau Obi) • Ref. SOP BJL-H-SOP-HRGA-005T (Rev.0) &amp; Master Tarif Lumpsum</p>
           </div>
           <div style="text-align:right;font-size:9px;color:#64748B;">
-            Dokumen Simulasi Roster &amp; Lumpsum BJL (v3.0)
+            Dokumen Simulasi Roster &amp; Lumpsum BJL (v3.1)
           </div>
         </div>
         <div class="print-emp-bar" id="bjlPrintEmpBar"></div>
@@ -197,19 +197,18 @@
               <select id="bjlPattern"></select>
             </div>
             <div class="field">
-              <label for="bjlSiteCountMode">Basis Hitung Target Roster</label>
-              <select id="bjlSiteCountMode">
-                <option value="calendar_site">Hari Kalender di Site (X + OFF)</option>
-                <option value="pure_work">Hari Kerja Fisik Murni (Hanya X)</option>
-              </select>
+              <label for="bjlFirstOffRefDate">Tanggal Hari OFF Pertama (Acuan Pola)</label>
+              <input type="date" id="bjlFirstOffRefDate" />
+              <span class="field-subnote">Opsional — sinkronkan fase OFF tiap karyawan</span>
             </div>
             <div class="field">
-              <label for="bjlCeRounding">Pembulatan Cuti Ekstra (CE)</label>
+              <label for="bjlCeRounding">Pembulatan Hak Cuti Ekstra (CE)</label>
               <select id="bjlCeRounding">
                 <option value="round">Standar (Round)</option>
                 <option value="floor">Ke Bawah (Floor)</option>
                 <option value="ceil">Ke Atas (Ceil)</option>
               </select>
+              <span class="field-subnote">Target roster selalu hitung Hari Kalender di Site</span>
             </div>
           </div>
         </div>
@@ -224,14 +223,7 @@
               <label for="bjlPohCity">Kota P.O.H (Master 26 Kota BJL)</label>
               <select id="bjlPohCity"></select>
             </div>
-            <div class="field">
-              <label for="bjlTrv1Placement">Penempatan TRV 1 (Malut Non-Halsel)</label>
-              <select id="bjlTrv1Placement">
-                <option value="depart">Saat Berangkat (1 hr) / Kembali 0</option>
-                <option value="return">Saat Kembali (1 hr) / Berangkat 0</option>
-              </select>
-            </div>
-            <div class="field">
+            <div class="field span-2">
               <label for="bjlViewMode">Rentang Kalender</label>
               <select id="bjlViewMode">
                 <option value="full_year">1 Tahun Penuh (Jan – Des)</option>
@@ -271,7 +263,7 @@
         </div>
         <div class="kpi-card kpi-bjl-ce">
           <span class="kpi-label">Cuti Ekstra (CE)</span>
-          <span class="kpi-value" id="bjlKpiCeVal">0 hr</span>
+          <span class="kpi-value" id="bjlKpiCeVal">0 / 0 hr</span>
           <span class="kpi-sub" id="bjlKpiCeSub">-</span>
         </div>
         <div class="kpi-card kpi-ct">
@@ -321,7 +313,7 @@
               🔓 Buka Semua Kunci
             </button>
             <button type="button" class="btn btn-ghost" id="bjlBtnClearCycleCustom" style="font-size:11.5px;padding:4px 8px;">
-              Reset Extend &amp; CP Custom
+              Reset Extend, CE &amp; CP
             </button>
             <button type="button" class="btn btn-ghost" id="bjlBtnClearCT" style="font-size:11.5px;padding:4px 8px;">
               Reset Alokasi CT
@@ -336,7 +328,8 @@
                 <th>Periode &amp; Kunci</th>
                 <th>Rentang On-Site</th>
                 <th>Berangkat &amp; Kembali</th>
-                <th>Extend Site → CE</th>
+                <th>Extend Site → Hak CE</th>
+                <th>Ambil CE</th>
                 <th>Cuti Periodik (CP)</th>
                 <th>Tambah CT</th>
                 <th>POH &amp; Tiket</th>
@@ -360,7 +353,7 @@
       </section>
 
       <footer class="footer-note no-print">
-        PT Baja Jaya Lestari (BJL) • Timesheet, Leave &amp; Lumpsum Simulator v3.0 • Master tarif Lumpsum &amp; aturan SOP tersedia di <code>config.js</code> dan dapat dikustomisasi lewat menu <strong>Tarif Lumpsum</strong> &amp; <strong>Tanda Tangan</strong>.
+        PT Baja Jaya Lestari (BJL) • Timesheet, Leave &amp; Lumpsum Simulator v3.1 • Master tarif Lumpsum &amp; aturan SOP tersedia di <code>config.js</code> dan dapat dikustomisasi lewat menu <strong>Tarif Lumpsum</strong> &amp; <strong>Tanda Tangan</strong>.
       </footer>
     </main>
 
@@ -377,7 +370,7 @@
             <p id="printSubtitle">Simulasi Roster 5:2 &amp; Rencana Pengambilan Cuti</p>
           </div>
           <div style="text-align:right;font-size:9px;color:#64748B;">
-            Dokumen Simulasi Roster Karyawan (v3.0)
+            Dokumen Simulasi Roster Karyawan (v3.1)
           </div>
         </div>
         <div class="print-emp-bar" id="printEmpBar"></div>
@@ -608,7 +601,7 @@
       </section>
 
       <footer class="footer-note no-print">
-        PT Kalimantan Agro Nusantara (KAN) • Timesheet &amp; Leave Simulator v3.0 • Ubah kode, SOP, P.O.H, hari libur nasional, dan aturan override di <code>config.js</code>.
+        PT Kalimantan Agro Nusantara (KAN) • Timesheet &amp; Leave Simulator v3.1 • Ubah kode, SOP, P.O.H, hari libur nasional, dan aturan override di <code>config.js</code>.
       </footer>
     </main>
 

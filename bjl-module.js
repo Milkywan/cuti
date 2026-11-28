@@ -2,18 +2,17 @@
  * ============================================================================
  * PT BAJA JAYA LESTARI (BJL) — TIMESHEET, LEAVE & LUMPSUM ENGINE (bjl-module.js)
  * ============================================================================
- * Fitur Lengkap BJL v3.0:
- * - Siklus Roster X56 (SPT, pembagi CE 4), X63 (SPV, pembagi CE 4,5), X70 (Lainnya, pembagi CE 5)
- * - Cuti Periodik default 14 hari + Extend Kerja On-Site -> Cuti Ekstra (CE) otomatis
- * - Pola Sistem Hari Kerja: 13:1, 6:1, dan 2:1
- * - Hari Travel (TRV): TRV 0 (Halsel Malut), TRV 1 (Malut Non-Halsel), TRV 2 (Non-Malut + Tiket Pesawat)
- * - Bracket Cuti Tahunan (CT) Otomatis Berdasarkan Masa Kerja:
- *     0 s/d <4 thn = 12 hr | >=4 s/d <7 thn = 13 hr | >=7 s/d <10 thn = 14 hr | >=10 thn = 15 hr
+ * Fitur Lengkap BJL v3.1:
+ * - Siklus Roster X56 (SPT, pembagi CE 4), X63 (SPV, pembagi CE 4,5), X70 (Lainnya, pembagi CE 5) — basis Hari Kalender di Site
+ * - Pola Sistem Hari Kerja: 13:1, 6:1, dan 2:1 (2 Hari Kerja : 1 Hari OFF) + Tanggal Acuan Hari OFF Pertama per karyawan
+ * - Extend Kerja On-Site (batas SOP 42 hr, simulasi s/d 90 hr dengan warna peringatan merah hari ke-43 dst.)
+ * - Tabungan Hak Cuti Ekstra (earnedCE) & Stepper Ambil CE bebas pilih periode selama saldo mencukupi
+ * - Hari Travel (TRV): TRV 0 (0 hr), TRV 1 & TRV 2 otomatis 1 hr berangkat + 1 hr pulang (2 hr PP)
+ * - Bracket Cuti Tahunan (CT) Otomatis Berdasarkan Masa Kerja (12–15 hr)
  * - Master Uang Lumpsum 26 Kota dari Excel (Berangkat Hijau / Kembali Oranye) + Slot Mandiri P6, M8, Y, Z
  * - Validasi SOP Penetapan & Perubahan POH (BJL-H-SOP-HRGA-005T)
- * - Kunci Periode (History Lock), Override Manual (S/I/DL/A/OFF*), Libur Nasional 2025-2027
- * - Blok Tanda Tangan PDF Dinamis (Default SOP BJL, urutan & isi dapat disesuaikan)
- * - Export Excel (.xlsx) 4 Sheet & Print PDF A4 Landscape
+ * - Kunci Periode (History Lock), Override Manual (S X-lanjut / IS reset-X1 / I / DL / A / OFF*), Libur Nasional 2025-2027
+ * - Blok Tanda Tangan PDF Dinamis & Export Excel (.xlsx) 4 Sheet + Print PDF A4 Landscape
  * ============================================================================
  */
 
@@ -27,6 +26,8 @@
   const SCENARIOS_KEY = 'bjl_timesheet_scenarios_v3';
   const CUSTOM_LUMPSUM_KEY = 'bjl_custom_lumpsum_v3';
   const SIG_STORAGE_KEY = 'ts_sim_signatures_BJL_v3';
+  const MAX_EXTEND_SOP = Number(CFG.maxExtendSopDays) || 42;
+  const MAX_EXTEND_INPUT = Number(CFG.maxExtendInputDays) || 90;
 
   // ---------- DEFAULT STATE ----------
   function createDefaultState() {
@@ -40,8 +41,7 @@
       employeeGrade: d.employeeGrade,
       rosterCode: d.rosterCode,
       workPattern: d.workPattern,
-      siteCountMode: d.siteCountMode, // 'calendar_site' | 'pure_work'
-      trv1Placement: d.trv1Placement, // 'depart' | 'return'
+      firstOffRefDate: d.firstOffRefDate || '',
       extraLeaveRounding: d.extraLeaveRounding, // 'round' | 'floor' | 'ceil'
       pohCity: d.pohCity,
       joinDate: d.joinDate,
@@ -52,9 +52,10 @@
       viewMode: d.viewMode,
       showHolidays: d.showHolidays !== false,
       cycleExtends: {},      // { [cycle]: extraSiteDays }
+      ceAllocations: {},     // { [cycle]: ceDaysTaken }
       cyclePeriodicDays: {}, // { [cycle]: customCPDays }
       ctAllocations: {},     // { [cycle]: ctDays }
-      lockedCycles: {},      // { [cycle]: { extendDays, cpDays, ctDays, rosterCode, workPattern, pohCity } }
+      lockedCycles: {},      // { [cycle]: { extendDays, ceDays, cpDays, ctDays, rosterCode, workPattern, pohCity } }
       manualOverrides: {},   // { [iso]: { type, note } }
       selectedDateKey: null
     };
@@ -78,6 +79,12 @@
 
   function addDays(d, n) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  }
+
+  function diffCalendarDays(dateA, dateB) {
+    const utcA = Date.UTC(dateA.getFullYear(), dateA.getMonth(), dateA.getDate());
+    const utcB = Date.UTC(dateB.getFullYear(), dateB.getMonth(), dateB.getDate());
+    return Math.round((utcA - utcB) / 86400000);
   }
 
   function daysInMonth(year, monthIndex) {
@@ -245,6 +252,7 @@
   function runSimulation() {
     const startDate = parseISODate(state.startDate) || parseISODate(CFG.defaults.startDate) || new Date();
     const joinDate = parseISODate(state.joinDate);
+    const firstOffRefDate = parseISODate(state.firstOffRefDate);
     const ctBracket = calcCtBracket(joinDate, startDate);
     if (state.autoCtFromBracket) {
       state.annualLeaveBalance = ctBracket.days;
@@ -273,13 +281,14 @@
     let curDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
     let cycleNum = 1;
     let remainingCT = Math.max(0, clampInt(state.annualLeaveBalance, 0, 60, ctBracket.days));
+    let ceBalance = 0;
 
     while (curDate <= simEnd && cycleNum <= 10) {
       const locked = state.lockedCycles[cycleNum] || null;
       const rosterCode = locked ? locked.rosterCode : state.rosterCode;
       const workPattern = locked ? locked.workPattern : state.workPattern;
       const pohCity = locked ? locked.pohCity : state.pohCity;
-      const extendDays = clampInt(locked ? locked.extendDays : (state.cycleExtends[cycleNum] || 0), 0, 45, 0);
+      const extendDays = clampInt(locked ? locked.extendDays : (state.cycleExtends[cycleNum] || 0), 0, MAX_EXTEND_INPUT, 0);
       const cpDays = clampInt(locked ? locked.cpDays : (state.cyclePeriodicDays[cycleNum] ?? state.defaultPeriodicDays), 1, 30, 14);
       const reqCT = clampInt(locked ? locked.ctDays : (state.ctAllocations[cycleNum] || 0), 0, 30, 0);
       const actualCT = Math.min(reqCT, remainingCT);
@@ -291,13 +300,21 @@
       const trvSpec = getTrvZoneSpec(cityObj);
       const ceCalc = calcExtraLeaveDays(extendDays, rosterSpec.extraLeaveDivisor, state.extraLeaveRounding);
 
-      // Travel split
-      let trvDepartDays = trvSpec.trvDepart;
-      let trvReturnDays = trvSpec.trvReturn;
-      if (trvSpec.trvDays === 1) {
-        if (state.trv1Placement === 'return') { trvDepartDays = 1; trvReturnDays = 1; }
-        else { trvDepartDays = 1; trvReturnDays = 1; }
-      }
+      // Tabungan Hak CE (earnedCE masuk saldo, pengambilan via stepper Ambil CE)
+      const earnedCE = ceCalc.days;
+      const ceBalanceBefore = ceBalance;
+      const ceAvailable = ceBalanceBefore + earnedCE;
+      const reqCE = clampInt(locked ? (locked.ceDays ?? 0) : (state.ceAllocations[cycleNum] || 0), 0, 90, 0);
+      const actualCE = Math.min(reqCE, ceAvailable);
+      ceBalance = ceAvailable - actualCE;
+
+      // SOP Extend 42 hari check
+      const overSopExtendDays = Math.max(0, extendDays - MAX_EXTEND_SOP);
+      const isExtendOverSop = overSopExtendDays > 0;
+
+      // Travel split (TRV 1 & TRV 2 otomatis 1 berangkat + 1 kembali PP)
+      const trvDepartDays = trvSpec.trvDepart;
+      const trvReturnDays = trvSpec.trvReturn;
 
       const siteStart = new Date(curDate.getTime());
       const baseTarget = rosterSpec.siteDays;
@@ -306,10 +323,11 @@
       let countedDays = 0;
       let physicalWorkDays = 0;
       let siteOffDays = 0;
-      let patternStep = 0; // 0 .. (workDays + offDays - 1)
+      let resetCount = 0;
+      let patternStep = 0; // dipakai jika firstOffRefDate tidak diisi
       const cycleLen = patSpec.workDays + patSpec.offDays;
 
-      // Phase 1: On-Site Period (Base Roster + Extend)
+      // Phase 1: On-Site Period (selalu menghitung Hari Kalender di Site: calendar_site)
       while (countedDays < totalSiteTarget && curDate <= simEnd) {
         const iso = toISODate(curDate);
         const ov = state.manualOverrides[iso] || null;
@@ -317,27 +335,70 @@
 
         if (ov && CFG.overrideTypes[ov.type]) {
           const ovSpec = CFG.overrideTypes[ov.type];
-          dayMap.set(iso, {
-            date: new Date(curDate.getTime()),
-            iso,
-            cycle: cycleNum,
-            kind: ov.type,
-            code: ovSpec.code,
-            isOverride: true,
-            overrideNote: ov.note || '',
-            holiday: getHoliday(iso),
-            detail: `Override ${ovSpec.label}${ov.note ? ' — ' + ov.note : ''}`
-          });
-          if (ovSpec.countsAsSite) {
+          if (ovSpec.resetsRosterX) {
+            // Ijin Sakit Tanpa Surat Dokter (IS): hitungan X terputus & reset ke X1 pada hari aktif berikutnya
+            const prevCount = countedDays;
+            countedDays = 0;
+            resetCount += 1;
+            if (!firstOffRefDate) patternStep = 0;
+            dayMap.set(iso, {
+              date: new Date(curDate.getTime()),
+              iso,
+              cycle: cycleNum,
+              kind: ov.type,
+              code: ovSpec.code,
+              isOverride: true,
+              resetsRosterX: true,
+              overrideNote: ov.note || '',
+              holiday: getHoliday(iso),
+              detail: `Override ${ovSpec.label} — Hitungan X terputus (reset dari hari ke-${prevCount} → mulai ulang X1 pada hari aktif berikutnya)${ov.note ? ' • ' + ov.note : ''}`
+            });
+          } else if (ovSpec.countsAsSite) {
+            // Termasuk Sakit Surat Dokter (S), Dinas Luar (DL), OFF Manual (OFF*) -> hitungan X tetap lanjut
             countedDays += 1;
+            const nextDetail = `Override ${ovSpec.label} — Hitungan roster lanjut (Hari ke-${countedDays}/${totalSiteTarget})${ov.note ? ' • ' + ov.note : ''}`;
+            dayMap.set(iso, {
+              date: new Date(curDate.getTime()),
+              iso,
+              cycle: cycleNum,
+              kind: ov.type,
+              code: ovSpec.code,
+              isOverride: true,
+              overrideNote: ov.note || '',
+              holiday: getHoliday(iso),
+              detail: nextDetail
+            });
             patternStep = (patternStep + 1) % cycleLen;
+          } else {
+            // Izin Resmi (I), Alpha (A): hitungan X tertahan
+            dayMap.set(iso, {
+              date: new Date(curDate.getTime()),
+              iso,
+              cycle: cycleNum,
+              kind: ov.type,
+              code: ovSpec.code,
+              isOverride: true,
+              overrideNote: ov.note || '',
+              holiday: getHoliday(iso),
+              detail: `Override ${ovSpec.label} — Hitungan roster tertahan di ke-${countedDays}/${totalSiteTarget}${ov.note ? ' • ' + ov.note : ''}`
+            });
           }
         } else {
-          const isPatternOff = patternStep >= patSpec.workDays;
+          // Tentukan hari OFF berdasarkan Tanggal Acuan Hari OFF Pertama (jika diisi) atau step dari startDate
+          let isPatternOff = false;
+          if (firstOffRefDate) {
+            const diff = diffCalendarDays(curDate, firstOffRefDate);
+            const mod = ((diff % cycleLen) + cycleLen) % cycleLen;
+            isPatternOff = mod < patSpec.offDays;
+          } else {
+            isPatternOff = patternStep >= patSpec.workDays;
+          }
+
           if (isPatternOff) {
             siteOffDays += 1;
-            const countsNow = state.siteCountMode === 'calendar_site';
-            if (countsNow) countedDays += 1;
+            countedDays += 1;
+            const extIdx = countedDays - baseTarget;
+            const isOverSopDay = isExtend && extIdx > MAX_EXTEND_SOP;
             dayMap.set(iso, {
               date: new Date(curDate.getTime()),
               iso,
@@ -345,21 +406,26 @@
               kind: 'offSite',
               code: CFG.codes.off,
               holiday: getHoliday(iso),
-              detail: `OFF Pola ${workPattern} di Site (Hari siklus ke-${countedDays}/${totalSiteTarget})`
+              detail: `OFF Pola ${workPattern} di Site (Hari siklus ke-${countedDays}/${totalSiteTarget}${isOverSopDay ? ' • ⚠️ Extend >' + MAX_EXTEND_SOP + ' hr SOP' : ''})`
             });
           } else {
             physicalWorkDays += 1;
             countedDays += 1;
-            const dayNumLabel = state.siteCountMode === 'calendar_site' ? countedDays : physicalWorkDays;
+            const dayNumLabel = countedDays;
+            const extDayNum = countedDays - baseTarget;
+            const isOverSopDay = isExtend && extDayNum > MAX_EXTEND_SOP;
+            const cellKind = isExtend ? (isOverSopDay ? 'extendOverSop' : 'extendWork') : 'work';
             dayMap.set(iso, {
               date: new Date(curDate.getTime()),
               iso,
               cycle: cycleNum,
-              kind: isExtend ? 'extendWork' : 'work',
+              kind: cellKind,
               code: `${CFG.codes.work}${dayNumLabel}`,
               holiday: getHoliday(iso),
               detail: isExtend
-                ? `Kerja Extend/Tunda Cuti hari ke-${countedDays - baseTarget} (Akumulasi Cuti Ekstra ÷ ${rosterSpec.extraLeaveDivisor})`
+                ? (isOverSopDay
+                    ? `⚠️ Extend On-Site hari ke-${extDayNum} (Melebihi Batas SOP ${MAX_EXTEND_SOP} hr! Akumulasi Hak CE ÷ ${rosterSpec.extraLeaveDivisor})`
+                    : `Extend On-Site hari ke-${extDayNum}/${extendDays} (Akumulasi Hak CE ÷ ${rosterSpec.extraLeaveDivisor})`)
                 : `Hari Kerja On-Site (${rosterCode}, Pola ${workPattern}) ke-${dayNumLabel}`
             });
           }
@@ -391,15 +457,15 @@
 
       // Phase 2: TRV Depart
       for (let i = 1; i <= trvDepartDays; i++) {
-        pushLeaveDay('trvDepart', CFG.codes.trvDepart, `Perjalanan Berangkat Site → ${cityObj.name} (${trvSpec.shortLabel})`);
+        pushLeaveDay('trvDepart', CFG.codes.trvDepart, `Perjalanan Berangkat Site → ${cityObj.name} (${trvSpec.trvCode || 'TRV'} — ${trvSpec.shortLabel})`);
       }
       // Phase 3: Cuti Periodik (CP)
       for (let i = 1; i <= cpDays; i++) {
         pushLeaveDay('periodicLeave', CFG.codes.periodicLeave, `Cuti Periodik (${rosterCode}) hari ke-${i} dari ${cpDays}`);
       }
-      // Phase 4: Cuti Ekstra (CE)
-      for (let i = 1; i <= ceCalc.days; i++) {
-        pushLeaveDay('extraLeave', CFG.codes.extraLeave, `Cuti Ekstra hari ke-${i} dari ${ceCalc.days} (Extend ${extendDays} hr ÷ ${rosterSpec.extraLeaveDivisor} = ${ceCalc.raw.toFixed(2)})`);
+      // Phase 4: Cuti Ekstra (CE) — sesuai pengambilan stepper Ambil CE
+      for (let i = 1; i <= actualCE; i++) {
+        pushLeaveDay('extraLeave', CFG.codes.extraLeave, `Pemakaian Cuti Ekstra (CE) hari ke-${i} dari ${actualCE} (Sisa Saldo CE setelah periode ini: ${ceBalance} hr)`);
       }
       // Phase 5: Cuti Tahunan (CT)
       for (let i = 1; i <= actualCT; i++) {
@@ -407,15 +473,14 @@
       }
       // Phase 6: TRV Return
       for (let i = 1; i <= trvReturnDays; i++) {
-        pushLeaveDay('trvReturn', CFG.codes.trvReturn, `Perjalanan Kembali ${cityObj.name} → Site (${trvSpec.shortLabel})`);
+        pushLeaveDay('trvReturn', CFG.codes.trvReturn, `Perjalanan Kembali ${cityObj.name} → Site (${trvSpec.trvCode || 'TRV'} — ${trvSpec.shortLabel})`);
       }
 
       const leaveEndDate = addDays(curDate, -1);
       const returnSiteDate = new Date(curDate.getTime());
-      const totalAwayDays = trvDepartDays + cpDays + ceCalc.days + actualCT + trvReturnDays;
+      const totalAwayDays = trvDepartDays + cpDays + actualCE + actualCT + trvReturnDays;
       const lumpsum = getLumpsumForGradeAndCity(state.employeeGrade, cityObj.name);
 
-      // Only include cycles that intersect or start near display window
       if (departDate <= windowEnd || siteStart <= windowEnd) {
         cycles.push({
           cycle: cycleNum,
@@ -430,6 +495,9 @@
           siteEnd,
           baseTarget,
           extendDays,
+          overSopExtendDays,
+          isExtendOverSop,
+          resetCount,
           physicalWorkDays,
           siteOffDays,
           departDate,
@@ -440,7 +508,11 @@
           trvTotalDays: trvDepartDays + trvReturnDays,
           cpDays,
           ceRaw: ceCalc.raw,
-          ceDays: ceCalc.days,
+          earnedCE,
+          ceBalanceBefore,
+          ceAvailable,
+          ceDays: actualCE,
+          ceBalanceAfter: ceBalance,
           ctDays: actualCT,
           totalAwayDays,
           lumpsum,
@@ -454,7 +526,7 @@
 
     // Build 12 x 31 matrix
     const totals = {
-      work: 0, extendWork: 0, offSite: 0, trv: 0, cp: 0, ce: 0, ct: 0,
+      work: 0, extendWork: 0, extendOverSop: 0, offSite: 0, trv: 0, cp: 0, ce: 0, ct: 0,
       overrides: 0, holidaysOnWork: 0
     };
 
@@ -480,6 +552,7 @@
 
         if (entry.kind === 'work') { stats.work++; totals.work++; if (hol) totals.holidaysOnWork++; }
         else if (entry.kind === 'extendWork') { stats.work++; totals.work++; totals.extendWork++; if (hol) totals.holidaysOnWork++; }
+        else if (entry.kind === 'extendOverSop') { stats.work++; totals.work++; totals.extendWork++; totals.extendOverSop++; if (hol) totals.holidaysOnWork++; }
         else if (entry.kind === 'offSite') { stats.off++; totals.offSite++; }
         else if (entry.kind === 'trvDepart' || entry.kind === 'trvReturn') { stats.trv++; totals.trv++; }
         else if (entry.kind === 'periodicLeave') { stats.cp++; totals.cp++; }
@@ -504,12 +577,25 @@
     const anyUnconfiguredLumpsum = visibleCycles.some(c => !c.lumpsum.isConfigured);
     const flightCount = visibleCycles.filter(c => c.trvZone.hasFlightTicket).length;
 
+    const totalEarnedCE = visibleCycles.reduce((s, c) => s + c.earnedCE, 0);
+    const totalUsedCE = visibleCycles.reduce((s, c) => s + c.ceDays, 0);
+    const remainingCE = visibleCycles.length ? visibleCycles[visibleCycles.length - 1].ceBalanceAfter : ceBalance;
+    const overSopCycles = visibleCycles.filter(c => c.isExtendOverSop);
+    const overSopCyclesCount = overSopCycles.length;
+    const maxCycleExtendDays = visibleCycles.reduce((m, c) => Math.max(m, c.extendDays), 0);
+
     return {
       startDate,
       joinDate,
+      firstOffRefDate,
       ctBracket,
       remainingCT,
       usedCT: Math.max(0, state.annualLeaveBalance - remainingCT),
+      totalEarnedCE,
+      totalUsedCE,
+      remainingCE,
+      overSopCyclesCount,
+      maxCycleExtendDays,
       cityObj: getCityObj(state.pohCity),
       trvSpec: getTrvZoneSpec(getCityObj(state.pohCity)),
       rosterSpec: getRosterSpec(state.rosterCode),
@@ -588,7 +674,7 @@
       pohSel.innerHTML = Object.entries(groups).map(([reg, list]) => {
         const opts = list.map(c => {
           const z = CFG.trvZones[c.zone];
-          return `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} — TRV ${z.trvDays}${z.hasFlightTicket ? ' + Pesawat' : ''}</option>`;
+          return `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} — ${escapeHtml(z.trvCode || ('TRV ' + z.trvDays))} (${z.trvDays} hr PP)${z.hasFlightTicket ? ' + Pesawat' : ''}</option>`;
         }).join('');
         return `<optgroup label="${escapeHtml(reg)}">${opts}</optgroup>`;
       }).join('');
@@ -607,7 +693,7 @@
   function renderLegend() {
     const bar = document.getElementById('bjlLegendBar');
     if (!bar) return;
-    const keys = ['work', 'offSite', 'extendWork', 'trvDepart', 'periodicLeave', 'extraLeave', 'annualLeave', 'trvReturn', 'sick', 'permit', 'duty', 'alpha'];
+    const keys = ['work', 'offSite', 'extendWork', 'extendOverSop', 'trvDepart', 'periodicLeave', 'extraLeave', 'annualLeave', 'trvReturn', 'sick', 'sickNoDoc', 'permit', 'duty', 'alpha'];
     bar.innerHTML = keys.map(k => {
       const sp = CFG.colors[k];
       if (!sp) return '';
@@ -632,13 +718,12 @@
     setVal('bjlGrade', state.employeeGrade);
     setVal('bjlRoster', state.rosterCode);
     setVal('bjlPattern', state.workPattern);
-    setVal('bjlSiteCountMode', state.siteCountMode);
+    setVal('bjlFirstOffRefDate', state.firstOffRefDate);
     setVal('bjlPohCity', state.pohCity);
     setVal('bjlJoinDate', state.joinDate);
     setVal('bjlStartDate', state.startDate);
     setVal('bjlCtBalance', state.annualLeaveBalance);
     setVal('bjlDefaultCP', state.defaultPeriodicDays);
-    setVal('bjlTrv1Placement', state.trv1Placement);
     setVal('bjlCeRounding', state.extraLeaveRounding);
     setVal('bjlViewMode', state.viewMode);
 
@@ -688,11 +773,11 @@
       printBar.innerHTML = `
         <div><strong>Nama:</strong> ${escapeHtml(state.employeeName)} (${escapeHtml(state.employeeNik)})</div>
         <div><strong>Dept / Jabatan:</strong> ${escapeHtml(state.employeeDepartment)} / ${escapeHtml(state.employeeRole)}</div>
-        <div><strong>Grade / Roster:</strong> ${escapeHtml(state.employeeGrade)} / ${escapeHtml(state.rosterCode)} (Pola ${escapeHtml(state.workPattern)})</div>
-        <div><strong>POH / Travel:</strong> ${escapeHtml(state.pohCity)} (TRV ${sim.trvSpec.trvDays}${sim.trvSpec.hasFlightTicket ? ' + Pesawat' : ''})</div>
+        <div><strong>Grade / Roster:</strong> ${escapeHtml(state.employeeGrade)} / ${escapeHtml(state.rosterCode)} (Pola ${escapeHtml(state.workPattern)}${sim.firstOffRefDate ? ' • Acuan OFF: ' + formatDateID(sim.firstOffRefDate, true) : ''})</div>
+        <div><strong>POH / Travel:</strong> ${escapeHtml(state.pohCity)} (${escapeHtml(sim.trvSpec.trvCode || 'TRV')} — ${sim.trvSpec.trvDays} hr PP${sim.trvSpec.hasFlightTicket ? ' + Pesawat' : ''})</div>
         <div><strong>Join Date / Masa Kerja:</strong> ${formatDateID(sim.joinDate, true)} (${sim.ctBracket.years}t ${sim.ctBracket.months}b)</div>
         <div><strong>Hak CT / Sisa:</strong> ${state.annualLeaveBalance} hr / ${sim.remainingCT} hr</div>
-        <div><strong>Pembagi Cuti Ekstra:</strong> ${String(sim.rosterSpec.extraLeaveDivisor).replace('.', ',')} hr kerja = 1 CE</div>
+        <div><strong>Saldo CE (Ambil/Hak):</strong> ${sim.totalUsedCE} / ${sim.totalEarnedCE} hr (Sisa ${sim.remainingCE} hr • ÷${String(sim.rosterSpec.extraLeaveDivisor).replace('.', ',')})</div>
         <div><strong>Est. Lumpsum 12 Bln:</strong> ${sim.anyUnconfiguredLumpsum ? 'Tarif Grade Belum Diisi' : formatRp(sim.totalLumpsumAll)}</div>
       `;
     }
@@ -700,17 +785,22 @@
 
   function renderKPIs(sim) {
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    const setHtml = (id, v) => { const el = document.getElementById(id); if (el) el.innerHTML = v; };
+
     set('bjlKpiWorkVal', `${sim.totals.work} hr`);
-    set('bjlKpiWorkSub', `OFF site: ${sim.totals.offSite} hr • Extend: ${sim.totals.extendWork} hr`);
+    const sopAlertHtml = sim.overSopCyclesCount > 0
+      ? ` <span class="bjl-sop-over-badge kpi-sop-alert">⚠️ SOP &gt;${MAX_EXTEND_SOP} hr (${sim.overSopCyclesCount} prd)</span>`
+      : '';
+    setHtml('bjlKpiWorkSub', `OFF site: ${sim.totals.offSite} hr • Extend: ${sim.totals.extendWork} hr${sopAlertHtml}`);
 
     set('bjlKpiCpVal', `${sim.totals.cp} hr`);
     set('bjlKpiCpSub', `${sim.visibleCycles.length} siklus cuti • ${sim.rosterSpec.code} (${sim.patternSpec.workDays}:${sim.patternSpec.offDays})`);
 
     set('bjlKpiTrvVal', `${sim.totals.trv} hr`);
-    set('bjlKpiTrvSub', `TRV ${sim.trvSpec.trvDays}/siklus • ${sim.trvSpec.hasFlightTicket ? sim.flightCount + 'x Tiket Pesawat' : 'Non-Pesawat'}`);
+    set('bjlKpiTrvSub', `${sim.trvSpec.trvCode || 'TRV'} (${sim.trvSpec.trvDays} hr PP)/siklus • ${sim.trvSpec.hasFlightTicket ? sim.flightCount + 'x Tiket Pesawat' : 'Non-Pesawat'}`);
 
-    set('bjlKpiCeVal', `${sim.totals.ce} hr`);
-    set('bjlKpiCeSub', `Pembagi ${sim.rosterSpec.code}: ${String(sim.rosterSpec.extraLeaveDivisor).replace('.', ',')}`);
+    set('bjlKpiCeVal', `${sim.totalUsedCE} / ${sim.totalEarnedCE} hr`);
+    setHtml('bjlKpiCeSub', `Sisa Saldo CE: <strong>${sim.remainingCE} hr</strong> • Pembagi ${sim.rosterSpec.code}: ${String(sim.rosterSpec.extraLeaveDivisor).replace('.', ',')}${sopAlertHtml}`);
 
     set('bjlKpiCtVal', `${sim.usedCT} / ${state.annualLeaveBalance} hr`);
     set('bjlKpiCtSub', `Sisa CT: ${sim.remainingCT} hr (Bracket ${sim.ctBracket.days} hr)`);
@@ -727,7 +817,8 @@
 
     const meta = document.getElementById('bjlMatrixMeta');
     if (meta) {
-      meta.textContent = `Roster ${state.rosterCode} (Pola ${state.workPattern}) • POH ${state.pohCity} (TRV ${sim.trvSpec.trvDays}) • Tgl Merah Kerja: ${sim.totals.holidaysOnWork} hr • Klik tanggal untuk detail / override`;
+      const offRefTxt = sim.firstOffRefDate ? ` • Acuan OFF: ${formatDateID(sim.firstOffRefDate, true)}` : '';
+      meta.textContent = `Roster ${state.rosterCode} (Pola ${state.workPattern}${offRefTxt}) • POH ${state.pohCity} (${sim.trvSpec.trvCode || 'TRV'}: ${sim.trvSpec.trvDays} hr PP) • Tgl Merah Kerja: ${sim.totals.holidaysOnWork} hr • Klik tanggal untuk detail / override`;
     }
 
     const ovCount = Object.keys(state.manualOverrides || {}).length;
@@ -782,7 +873,7 @@
     if (!iso) {
       bar.innerHTML = `
         <div class="inspector-main">
-          <strong>Inspektor Tanggal &amp; Override Manual BJL:</strong> Klik tanggal mana saja di matriks untuk melihat rincian jadwal (X, OFF, TRV, CP, CE, CT), cek Hari Libur Nasional, atau menerapkan override (S, I, DL, A, OFF*).
+          <strong>Inspektor Tanggal &amp; Override Manual BJL:</strong> Klik tanggal mana saja di matriks untuk melihat rincian jadwal (X, OFF, TRV, CP, CE, CT), cek Hari Libur Nasional, atau menerapkan override (S [X lanjut], IS [Reset X1], I, DL, A, OFF*).
         </div>
       `;
       return;
@@ -846,7 +937,7 @@
     if (!tbody) return;
 
     if (!sim.visibleCycles.length) {
-      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#64748B;padding:18px;">Belum ada periode cuti yang berangkat pada rentang 12 bulan aktif.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#64748B;padding:18px;">Belum ada periode cuti yang berangkat pada rentang 12 bulan aktif.</td></tr>`;
       return;
     }
 
@@ -864,12 +955,20 @@
         ? `<div class="badge-holiday-hit">🎉 ${cyc.holidaysInLeave.length} Tgl Merah: ${escapeHtml(cyc.holidaysInLeave.slice(0, 2).map(h => h.name).join(', '))}${cyc.holidaysInLeave.length > 2 ? '…' : ''}</div>`
         : '';
 
+      const sopBadge = cyc.isExtendOverSop
+        ? `<div class="bjl-sop-over-badge" title="Extend melebihi batas SOP ${MAX_EXTEND_SOP} hari (+${cyc.overSopExtendDays} hr ditandai merah di matriks)">⚠️ Melebihi SOP ${MAX_EXTEND_SOP} Hr (+${cyc.overSopExtendDays} hr)</div>`
+        : '';
+
+      const resetBadge = cyc.resetCount > 0
+        ? `<div class="bjl-reset-badge">↻ ${cyc.resetCount}× Reset X1 (IS)</div>`
+        : '';
+
       const ticketPill = cyc.trvZone.hasFlightTicket
         ? `<span class="pill pill-company">✈️ Tiket Pesawat PP</span>`
         : `<span class="pill pill-local">⛴️ Non-Pesawat</span>`;
 
       return `
-        <tr class="${cyc.isLocked ? 'cycle-locked' : ''}">
+        <tr class="${cyc.isLocked ? 'cycle-locked' : ''}${cyc.isExtendOverSop ? ' cycle-over-sop' : ''}">
           <td>
             <strong>Periode ${cyc.cycle}</strong>
             <div class="tc-flow-meta">${escapeHtml(cyc.rosterCode)} • Pola ${escapeHtml(cyc.workPattern)}</div>
@@ -880,6 +979,7 @@
           <td>
             <div>${formatDateID(cyc.siteStart, true)} – ${formatDateID(cyc.siteEnd, true)}</div>
             <div class="tc-flow-meta">On-site: ${cyc.baseTarget}${cyc.extendDays > 0 ? ' + ' + cyc.extendDays + ' ext' : ''} hr (${cyc.physicalWorkDays} kerja, ${cyc.siteOffDays} OFF)</div>
+            ${resetBadge}
           </td>
           <td>
             <strong>${CFG.labels.dayNamesShort[cyc.departDate.getDay()]}, ${formatDateID(cyc.departDate, true)}</strong>
@@ -890,10 +990,19 @@
           <td>
             <div class="ct-stepper">
               <button type="button" data-bjl-ext-dec="${cyc.cycle}" ${cyc.isLocked ? 'disabled' : ''}>−</button>
-              <input type="number" min="0" max="45" value="${cyc.extendDays}" data-bjl-ext-in="${cyc.cycle}" ${cyc.isLocked ? 'disabled' : ''} />
+              <input type="number" min="0" max="${MAX_EXTEND_INPUT}" value="${cyc.extendDays}" data-bjl-ext-in="${cyc.cycle}" ${cyc.isLocked ? 'disabled' : ''} />
               <button type="button" data-bjl-ext-inc="${cyc.cycle}" ${cyc.isLocked ? 'disabled' : ''}>+</button>
             </div>
-            <div class="tc-flow-meta">CE: <strong>${cyc.ceDays} hr</strong> (${cyc.extendDays}÷${String(cyc.rosterDivisor).replace('.', ',')}=${cyc.ceRaw.toFixed(2)})</div>
+            <div class="tc-flow-meta">Hak CE: <strong>+${cyc.earnedCE} hr</strong> (${cyc.extendDays}÷${String(cyc.rosterDivisor).replace('.', ',')}=${cyc.ceRaw.toFixed(2)})</div>
+            ${sopBadge}
+          </td>
+          <td>
+            <div class="ct-stepper">
+              <button type="button" data-bjl-ce-dec="${cyc.cycle}" ${cyc.isLocked || cyc.ceDays <= 0 ? 'disabled' : ''}>−</button>
+              <input type="number" min="0" max="${cyc.ceAvailable}" value="${cyc.ceDays}" data-bjl-ce-in="${cyc.cycle}" ${cyc.isLocked ? 'disabled' : ''} />
+              <button type="button" data-bjl-ce-inc="${cyc.cycle}" ${cyc.isLocked || cyc.ceDays >= cyc.ceAvailable ? 'disabled' : ''}>+</button>
+            </div>
+            <div class="tc-flow-meta">Saldo: <strong>${cyc.ceAvailable} hr</strong> • Sisa: <strong>${cyc.ceBalanceAfter} hr</strong></div>
           </td>
           <td>
             <div class="ct-stepper">
@@ -901,7 +1010,7 @@
               <input type="number" min="1" max="30" value="${cyc.cpDays}" data-bjl-cp-in="${cyc.cycle}" ${cyc.isLocked ? 'disabled' : ''} />
               <button type="button" data-bjl-cp-inc="${cyc.cycle}" ${cyc.isLocked ? 'disabled' : ''}>+</button>
             </div>
-            <div class="tc-flow-meta">TRV: <strong>${cyc.trvTotalDays} hr</strong> (${cyc.trvDepartDays} brgkt + ${cyc.trvReturnDays} kmbl)</div>
+            <div class="tc-flow-meta">${escapeHtml(cyc.trvZone.trvCode || 'TRV')}: <strong>${cyc.trvTotalDays} hr</strong> (${cyc.trvDepartDays} brgkt + ${cyc.trvReturnDays} plg)</div>
           </td>
           <td>
             <div class="ct-stepper">
@@ -927,7 +1036,7 @@
     // Grand total row
     tbody.innerHTML += `
       <tr class="total-row">
-        <td colspan="7" style="text-align:right;font-weight:700;">TOTAL ESTIMASI LUMPSUM (${sim.visibleCycles.length} SIKLUS CUTI):</td>
+        <td colspan="8" style="text-align:right;font-weight:700;">TOTAL ESTIMASI LUMPSUM (${sim.visibleCycles.length} SIKLUS CUTI • HAK CE: ${sim.totalEarnedCE} HR, TERPAKAI: ${sim.totalUsedCE} HR, SISA: ${sim.remainingCE} HR):</td>
         <td><strong style="color:#065F46;">${sim.anyUnconfiguredLumpsum ? 'Sebagian Kosong' : formatRp(sim.totalLumpsumDepart)}</strong></td>
         <td>
           <strong style="color:#9A3412;">${sim.anyUnconfiguredLumpsum ? 'Sebagian Kosong' : formatRp(sim.totalLumpsumReturn)}</strong>
@@ -948,6 +1057,7 @@
         } else {
           state.lockedCycles[c] = {
             extendDays: cyc.extendDays,
+            ceDays: cyc.ceDays,
             cpDays: cyc.cpDays,
             ctDays: cyc.ctDays,
             rosterCode: cyc.rosterCode,
@@ -960,7 +1070,8 @@
       });
     });
 
-    const bindStepper = (prefix, mapObj, minV, maxV, fallbackFn) => {
+    const bindStepper = (prefix, mapObj, minV, maxVOrFn, fallbackFn) => {
+      const getMax = (c) => typeof maxVOrFn === 'function' ? maxVOrFn(c) : maxVOrFn;
       tbody.querySelectorAll(`[data-bjl-${prefix}-dec]`).forEach(btn => {
         btn.addEventListener('click', () => {
           const c = Number(btn.dataset[`bjl${prefix.charAt(0).toUpperCase() + prefix.slice(1)}Dec`]);
@@ -973,20 +1084,24 @@
         btn.addEventListener('click', () => {
           const c = Number(btn.dataset[`bjl${prefix.charAt(0).toUpperCase() + prefix.slice(1)}Inc`]);
           const cur = mapObj[c] ?? fallbackFn(c);
-          mapObj[c] = Math.min(maxV, cur + 1);
+          mapObj[c] = Math.min(getMax(c), cur + 1);
           saveAndRender();
         });
       });
       tbody.querySelectorAll(`[data-bjl-${prefix}-in]`).forEach(inp => {
         inp.addEventListener('change', () => {
           const c = Number(inp.dataset[`bjl${prefix.charAt(0).toUpperCase() + prefix.slice(1)}In`]);
-          mapObj[c] = clampInt(inp.value, minV, maxV, fallbackFn(c));
+          mapObj[c] = clampInt(inp.value, minV, getMax(c), fallbackFn(c));
           saveAndRender();
         });
       });
     };
 
-    bindStepper('ext', state.cycleExtends, 0, 45, () => 0);
+    bindStepper('ext', state.cycleExtends, 0, MAX_EXTEND_INPUT, () => 0);
+    bindStepper('ce', state.ceAllocations, 0, (c) => {
+      const cyc = sim.cycles.find(x => x.cycle === c);
+      return cyc ? cyc.ceAvailable : 0;
+    }, () => 0);
     bindStepper('cp', state.cyclePeriodicDays, 1, 30, () => state.defaultPeriodicDays);
     bindStepper('ct', state.ctAllocations, 0, 30, () => 0);
   }
@@ -1133,7 +1248,7 @@
       ws.getRow(2).height = 20;
 
       ws.mergeCells('A3:AK3');
-      ws.getCell('A3').value = `POH: ${state.pohCity} (TRV ${sim.trvSpec.trvDays}, ${sim.trvSpec.hasFlightTicket ? 'Tiket Pesawat' : 'Non-Pesawat'}) | Masa Kerja: ${sim.ctBracket.years}t ${sim.ctBracket.months}b (CT ${state.annualLeaveBalance} hr, Sisa ${sim.remainingCT} hr) | Pembagi CE: ${sim.rosterSpec.extraLeaveDivisor}`;
+      ws.getCell('A3').value = `POH: ${state.pohCity} (${sim.trvSpec.trvCode || 'TRV'} — ${sim.trvSpec.trvDays} hr PP, ${sim.trvSpec.hasFlightTicket ? 'Tiket Pesawat' : 'Non-Pesawat'}) | Acuan OFF: ${sim.firstOffRefDate ? formatDateID(sim.firstOffRefDate, true) : 'Default Hari 1'} | Masa Kerja: ${sim.ctBracket.years}t ${sim.ctBracket.months}b (CT ${state.annualLeaveBalance}/${sim.remainingCT} hr) | Saldo CE: ${sim.totalUsedCE}/${sim.totalEarnedCE} hr (Sisa ${sim.remainingCE} hr)`;
       ws.getCell('A3').font = { name: 'Calibri', size: 9.5, color: { argb: 'FF475569' } };
       ws.getRow(3).height = 18;
       ws.getRow(4).height = 6;
@@ -1209,11 +1324,14 @@
         { header: 'Roster / Pola', key: 'roster', width: 15 },
         { header: 'Kerja di Site', key: 'site', width: 25 },
         { header: 'Extend (Hr)', key: 'ext', width: 11 },
+        { header: 'Status SOP Extend', key: 'sop', width: 19 },
+        { header: 'Hak CE (+)', key: 'earnedCe', width: 11 },
+        { header: 'Ambil CE', key: 'ce', width: 10 },
+        { header: 'Sisa CE', key: 'remCe', width: 10 },
         { header: 'Berangkat', key: 'depart', width: 18 },
         { header: 'Kembali Site', key: 'ret', width: 16 },
         { header: 'TRV', key: 'trv', width: 7 },
         { header: 'CP', key: 'cp', width: 7 },
-        { header: 'CE', key: 'ce', width: 7 },
         { header: 'CT', key: 'ct', width: 7 },
         { header: 'Total Cuti+TRV', key: 'tot', width: 14 },
         { header: 'POH & Tiket', key: 'poh', width: 24 },
@@ -1224,8 +1342,8 @@
       ws2.getRow(1).eachCell((cell, colNum) => {
         cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
         let fg = 'FF1E3A5F';
-        if (colNum === 14) fg = 'FF15803D'; // Green depart
-        if (colNum === 15) fg = 'FFC2410C'; // Orange return
+        if (colNum === 17) fg = 'FF15803D'; // Green depart
+        if (colNum === 18) fg = 'FFC2410C'; // Orange return
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fg } };
       });
 
@@ -1236,11 +1354,14 @@
           roster: `${cyc.rosterCode} (${cyc.workPattern})`,
           site: `${formatDateID(cyc.siteStart, true)} – ${formatDateID(cyc.siteEnd, true)}`,
           ext: cyc.extendDays,
+          sop: cyc.isExtendOverSop ? `Melebihi SOP (+${cyc.overSopExtendDays} hr)` : 'Sesuai SOP (≤42 hr)',
+          earnedCe: cyc.earnedCE,
+          ce: cyc.ceDays,
+          remCe: cyc.ceBalanceAfter,
           depart: `${CFG.labels.dayNamesShort[cyc.departDate.getDay()]}, ${formatDateID(cyc.departDate, true)}`,
           ret: formatDateID(cyc.returnSiteDate, true),
           trv: cyc.trvTotalDays,
           cp: cyc.cpDays,
-          ce: cyc.ceDays,
           ct: cyc.ctDays,
           tot: cyc.totalAwayDays,
           poh: `${cyc.pohCity} (${cyc.trvZone.hasFlightTicket ? 'Pesawat' : 'Non-Pesawat'})`,
@@ -1248,21 +1369,28 @@
           lback: cyc.lumpsum.isConfigured ? cyc.lumpsum.return.total : 0,
           lpp: cyc.lumpsum.isConfigured ? cyc.lumpsum.grandTotal : 0
         });
-        row.getCell(14).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
-        row.getCell(15).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
-        [14, 15, 16].forEach(c => { row.getCell(c).numFmt = '#,##0'; });
+        if (cyc.isExtendOverSop) {
+          row.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+          row.getCell(6).font = { bold: true, color: { argb: 'FF991B1B' } };
+        }
+        row.getCell(17).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+        row.getCell(18).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
+        [17, 18, 19].forEach(c => { row.getCell(c).numFmt = '#,##0'; });
       });
 
       if (sim.visibleCycles.length > 0) {
         const lastR = sim.visibleCycles.length + 1;
         const sumR = ws2.addRow({
           periode: 'TOTAL',
-          lgo: { formula: `SUM(N2:N${lastR})`, result: sim.totalLumpsumDepart },
-          lback: { formula: `SUM(O2:O${lastR})`, result: sim.totalLumpsumReturn },
-          lpp: { formula: `SUM(P2:P${lastR})`, result: sim.totalLumpsumAll }
+          earnedCe: { formula: `SUM(G2:G${lastR})`, result: sim.totalEarnedCE },
+          ce: { formula: `SUM(H2:H${lastR})`, result: sim.totalUsedCE },
+          remCe: sim.remainingCE,
+          lgo: { formula: `SUM(Q2:Q${lastR})`, result: sim.totalLumpsumDepart },
+          lback: { formula: `SUM(R2:R${lastR})`, result: sim.totalLumpsumReturn },
+          lpp: { formula: `SUM(S2:S${lastR})`, result: sim.totalLumpsumAll }
         });
         sumR.eachCell(c => { c.font = { bold: true }; });
-        [14, 15, 16].forEach(c => { sumR.getCell(c).numFmt = '#,##0'; });
+        [17, 18, 19].forEach(c => { sumR.getCell(c).numFmt = '#,##0'; });
       }
 
       // SHEET 3: MASTER TARIF LUMPSUM AKTIF
@@ -1284,7 +1412,7 @@
         const r = ws3.addRow({
           city: c.name,
           region: c.region,
-          trv: `TRV ${CFG.trvZones[c.zone].trvDays}`,
+          trv: `${CFG.trvZones[c.zone].trvCode || 'TRV'} (${CFG.trvZones[c.zone].trvDays} hr PP)`,
           go: l.isConfigured ? l.depart.total : 'Belum Diisi',
           back: l.isConfigured ? l.return.total : 'Belum Diisi',
           pp: l.isConfigured ? l.grandTotal : 'Belum Diisi'
@@ -1395,11 +1523,10 @@
     bind('bjlGrade', 'employeeGrade');
     bind('bjlRoster', 'rosterCode');
     bind('bjlPattern', 'workPattern');
-    bind('bjlSiteCountMode', 'siteCountMode');
+    bind('bjlFirstOffRefDate', 'firstOffRefDate');
     bind('bjlPohCity', 'pohCity');
     bind('bjlJoinDate', 'joinDate');
     bind('bjlStartDate', 'startDate');
-    bind('bjlTrv1Placement', 'trv1Placement');
     bind('bjlCeRounding', 'extraLeaveRounding');
     bind('bjlViewMode', 'viewMode');
 
@@ -1437,9 +1564,10 @@
 
     document.getElementById('bjlBtnClearCycleCustom')?.addEventListener('click', () => {
       state.cycleExtends = {};
+      state.ceAllocations = {};
       state.cyclePeriodicDays = {};
       saveAndRender();
-      showToast('Extend & durasi custom periode BJL di-reset.');
+      showToast('Extend, alokasi Ambil CE & durasi CP custom BJL di-reset.');
     });
 
     document.getElementById('bjlBtnClearCT')?.addEventListener('click', () => {
