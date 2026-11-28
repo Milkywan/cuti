@@ -3,316 +3,638 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>KAN Timesheet &amp; Leave Simulator</title>
+  <title>Timesheet &amp; Leave Simulator Suite v3.0 — PT KAN &amp; PT BJL</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
-<body>
+<body data-company="BJL">
 
-  <!-- TOP NAVIGATION BAR -->
-  <header class="topbar no-print">
-    <div class="topbar-inner">
-      <div class="brand">
-        <div class="brand-mark">KAN</div>
+  <!-- ==================== LOGIN SCREEN ==================== -->
+  <div class="login-screen no-print" id="loginScreen">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-mark">TS3</div>
         <div>
-          <h1 class="brand-title" id="appTitle">KAN Timesheet &amp; Leave Simulator</h1>
-          <p class="brand-subtitle" id="appSubtitle">Simulasi Roster 5:2, P.O.H, Kunci Periode, Carry-Over TC &amp; Kuota Tiket</p>
+          <h1>Timesheet &amp; Leave Simulator Suite</h1>
+          <p>Multi-Company HRGA Platform — PT KAN &amp; PT BJL (v3.0)</p>
         </div>
       </div>
 
-      <div class="topbar-actions">
-        <button type="button" class="btn" id="btnOpenScenario" title="Simpan, muat, atau export/import skenario JSON">
-          💾 Skenario
-        </button>
-        <button type="button" class="btn btn-soft" id="btnShareLink" title="Salin link simulasi untuk dibagikan ke HR / Atasan">
-          🔗 Bagikan
-        </button>
-        <button type="button" class="btn btn-ghost" id="btnShowConfig" title="Lihat isi konfigurasi aktif dari config.js">
-          ⚙️ config.js
-        </button>
-        <button type="button" class="btn" id="btnReset" title="Kembalikan semua input ke default">
-          ↺ Reset
-        </button>
-        <button type="button" class="btn btn-soft" id="btnExportExcel">
-          📊 Excel
-        </button>
-        <button type="button" class="btn btn-primary" id="btnPrintPdf">
-          🖨️ Cetak / PDF
-        </button>
+      <form class="login-form" id="loginForm" autocomplete="off">
+        <div class="login-error" id="loginError">Username atau password tidak sesuai.</div>
+
+        <div class="field">
+          <label for="loginUsername">Username</label>
+          <input type="text" id="loginUsername" placeholder="Masukkan username (misal: irwans)" required />
+        </div>
+
+        <div class="field">
+          <label for="loginPassword">Password</label>
+          <div class="password-wrap">
+            <input type="password" id="loginPassword" placeholder="Masukkan password" required />
+            <button type="button" class="password-toggle" id="btnTogglePassword" title="Tampilkan / sembunyikan password">👁️</button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary login-submit-btn">🔐 Masuk ke Simulator</button>
+      </form>
+
+      <div class="login-accounts-box">
+        <div><strong>Akses Cepat Akun Default</strong> (dapat diubah di <code>config.js</code>):</div>
+        <div class="login-quick-row" id="loginQuickUsers"></div>
       </div>
     </div>
-  </header>
+  </div>
 
-  <main class="container">
+  <!-- ==================== MAIN APPLICATION SHELL ==================== -->
+  <div class="app-shell hidden" id="appShell">
 
-    <!-- PRINT-ONLY FORMAL HEADER -->
-    <section class="print-only">
-      <div class="print-header">
-        <div>
-          <h1 id="printCompanyTitle">PT Kalimantan Agro Nusantara (KAN)</h1>
-          <p id="printSubtitle">Simulasi Roster 5:2 &amp; Rencana Pengambilan Cuti</p>
+    <!-- UNIFIED TOP NAVIGATION BAR -->
+    <header class="topbar no-print">
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="brand-mark" id="brandMark">BJL</div>
+          <div>
+            <h1 class="brand-title" id="appTitle">Timesheet &amp; Leave Simulator <span class="version-pill">v3.0</span></h1>
+            <p class="brand-subtitle" id="appSubtitle">PT Baja Jaya Lestari (BJL) — Roster Site, Cuti &amp; Lumpsum</p>
+          </div>
         </div>
-        <div style="text-align:right;font-size:9px;color:#64748B;">
-          Dokumen Simulasi Roster Karyawan (v2.0)
+
+        <div class="topbar-actions">
+          <!-- Company Switcher (visible when user has > 1 company) -->
+          <div class="company-switcher" id="companySwitcher" style="display:none;">
+            <button type="button" class="company-tab" data-company="BJL">PT BJL</button>
+            <button type="button" class="company-tab" data-company="KAN">PT KAN</button>
+          </div>
+
+          <button type="button" class="btn btn-soft" id="btnOpenLumpsum" title="Kelola Master & Input Mandiri Tarif Lumpsum BJL">
+            💰 Tarif Lumpsum
+          </button>
+          <button type="button" class="btn" id="btnOpenSignatures" title="Atur susunan blok tanda tangan cetak PDF">
+            ✍️ Tanda Tangan
+          </button>
+          <button type="button" class="btn" id="btnOpenScenario" title="Simpan, muat, atau export/import skenario JSON">
+            💾 Skenario
+          </button>
+          <button type="button" class="btn btn-soft" id="btnShareLink" title="Salin link simulasi untuk dibagikan ke HR / Atasan">
+            🔗 Bagikan
+          </button>
+          <button type="button" class="btn btn-ghost" id="btnShowConfig" title="Lihat isi konfigurasi aktif dari config.js">
+            ⚙️ config.js
+          </button>
+          <button type="button" class="btn" id="btnReset" title="Kembalikan semua input modul aktif ke default">
+            ↺ Reset
+          </button>
+          <button type="button" class="btn btn-soft" id="btnExportExcel">
+            📊 Excel
+          </button>
+          <button type="button" class="btn btn-primary" id="btnPrintPdf">
+            🖨️ Cetak / PDF
+          </button>
+
+          <div class="user-chip" id="userBadge">
+            <span id="userDisplayName">User</span>
+            <span class="user-role-tag" id="userRoleTag">Role</span>
+          </div>
+          <button type="button" class="btn btn-ghost" id="btnLogout" title="Keluar dari sesi login">
+            🚪 Keluar
+          </button>
         </div>
       </div>
-      <div class="print-emp-bar" id="printEmpBar"></div>
-    </section>
+    </header>
 
-    <!-- CONTROLS PANEL (3 CARDS) -->
-    <section class="controls-grid no-print">
+    <!-- ================================================================== -->
+    <!-- WORKSPACE 1: PT BAJA JAYA LESTARI (BJL)                            -->
+    <!-- ================================================================== -->
+    <main class="container workspace-section" id="workspaceBJL">
 
-      <!-- CARD 1: PROFIL, P.O.H & SALDO AWAL -->
-      <div class="card">
-        <div class="card-header">
-          <h2 class="card-title"><span class="step-badge">1</span> Profil Karyawan, P.O.H &amp; Saldo</h2>
-        </div>
-        <div class="form-grid">
-          <div class="field span-2">
-            <label for="inputName">Nama Karyawan</label>
-            <input type="text" id="inputName" placeholder="Nama lengkap karyawan" />
+      <!-- PRINT-ONLY FORMAL HEADER (BJL) -->
+      <section class="print-only">
+        <div class="print-header">
+          <div>
+            <h1>PT Baja Jaya Lestari (BJL) — Simulasi Roster, Cuti &amp; Lumpsum</h1>
+            <p>Smelter Site Kawasi (Pulau Obi) • Ref. SOP BJL-H-SOP-HRGA-005T (Rev.0) &amp; Master Tarif Lumpsum</p>
           </div>
-          <div class="field">
-            <label for="inputNik">NIK / ID</label>
-            <input type="text" id="inputNik" placeholder="KAN-2025-XXXX" />
-          </div>
-          <div class="field">
-            <label for="inputGrade">Kategori Jabatan</label>
-            <select id="inputGrade"></select>
-          </div>
-          <div class="field span-2">
-            <label for="inputRole">Jabatan / Divisi</label>
-            <input type="text" id="inputRole" placeholder="Asisten / Staff Site" />
-          </div>
-          <div class="field">
-            <label for="inputPohCategory">Kategori P.O.H</label>
-            <select id="inputPohCategory"></select>
-          </div>
-          <div class="field">
-            <label for="inputPohCity">Kota / Bandara P.O.H</label>
-            <input type="text" id="inputPohCity" placeholder="Misal: Surabaya (SUB)" />
-          </div>
-          <div class="field">
-            <label for="inputJoinDate">Tanggal Masuk (Join Date)</label>
-            <input type="date" id="inputJoinDate" />
-          </div>
-          <div class="field">
-            <label for="inputCtBalance">Saldo Cuti Tahunan (CT)</label>
-            <input type="number" id="inputCtBalance" min="0" max="60" step="1" />
-          </div>
-          <div class="field span-2">
-            <label for="inputInitialTc">Saldo Awal TC (Carry-Over Periode Lalu)</label>
-            <input type="number" id="inputInitialTc" min="0" max="30" step="1" />
-          </div>
-          <div class="field span-2">
-            <div class="field-hint" id="joinDateHint"></div>
+          <div style="text-align:right;font-size:9px;color:#64748B;">
+            Dokumen Simulasi Roster &amp; Lumpsum BJL (v3.0)
           </div>
         </div>
-      </div>
+        <div class="print-emp-bar" id="bjlPrintEmpBar"></div>
+      </section>
 
-      <!-- CARD 2: JADWAL MULAI & ATURAN SIKLUS -->
-      <div class="card">
-        <div class="card-header">
-          <h2 class="card-title"><span class="step-badge">2</span> Jadwal Mulai &amp; Durasi Cuti</h2>
-        </div>
-        <div class="form-grid">
-          <div class="field">
-            <label for="inputStartDate" id="labelStartX1">Mulai Kerja (X1) di Site</label>
-            <input type="date" id="inputStartDate" />
-          </div>
-          <div class="field">
-            <label for="inputHomeDays">Default Hari di Rumah</label>
-            <input type="number" id="inputHomeDays" min="9" max="30" step="1" />
-          </div>
-          <div class="field span-2">
-            <label>Preset Durasi Cuti Default</label>
-            <div class="preset-row" id="presetRow"></div>
-            <div class="field-hint" id="labelMinDaysHint">Kunci minimal SOP: 9 hari. Durasi tiap periode juga bisa diubah berbeda &amp; dikunci di tabel bawah.</div>
-          </div>
-          <div class="field span-2">
-            <label for="inputOffDay">Hari OFF Mingguan Departemen</label>
-            <select id="inputOffDay"></select>
-          </div>
-          <div class="field span-2">
-            <div class="field-hint" id="pohRuleHint"></div>
-          </div>
-        </div>
-      </div>
+      <!-- BJL CONTROLS PANEL (3 CARDS) -->
+      <section class="controls-grid no-print">
 
-      <!-- CARD 3: OPSI KEBERANGKATAN & TAMPILAN -->
-      <div class="card">
-        <div class="card-header">
-          <h2 class="card-title"><span class="step-badge">3</span> Opsi Keberangkatan &amp; Tampilan</h2>
-        </div>
-        <div class="form-grid">
-          <div class="field span-2">
-            <label>Skenario Keberangkatan Minggu Terakhir</label>
-            <div class="radio-stack">
-              <label class="radio-card">
-                <input type="radio" name="departureMode" value="work_day6" />
-                <span id="labelDepartWork6">Masuk kerja penuh di hari ke-6 (TC terakhir terbit)</span>
+        <!-- BJL CARD 1: PROFIL KARYAWAN, GRADE & MASA KERJA -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="step-badge">1</span> Profil Karyawan, Grade &amp; Masa Kerja</h2>
+          </div>
+          <div class="form-grid">
+            <div class="field span-2">
+              <label for="bjlName">Nama Karyawan</label>
+              <input type="text" id="bjlName" placeholder="Nama lengkap karyawan" />
+            </div>
+            <div class="field">
+              <label for="bjlNik">NIK / ID</label>
+              <input type="text" id="bjlNik" placeholder="BJL-2024-XXXX" />
+            </div>
+            <div class="field">
+              <label for="bjlDept">Departemen</label>
+              <input type="text" id="bjlDept" placeholder="HRGA / Operasional" />
+            </div>
+            <div class="field">
+              <label for="bjlRole">Jabatan</label>
+              <input type="text" id="bjlRole" placeholder="Supervisor / Staff" />
+            </div>
+            <div class="field">
+              <label for="bjlGrade">Grade (Tarif Lumpsum)</label>
+              <select id="bjlGrade"></select>
+            </div>
+            <div class="field">
+              <label for="bjlJoinDate">Tanggal Masuk (Join Date)</label>
+              <input type="date" id="bjlJoinDate" />
+            </div>
+            <div class="field">
+              <label for="bjlCtBalance">Hak Cuti Tahunan (CT)</label>
+              <input type="number" id="bjlCtBalance" min="0" max="60" step="1" />
+            </div>
+            <div class="field span-2">
+              <label class="toggle-inline">
+                <input type="checkbox" id="bjlAutoCt" />
+                <span>Otomatis ikuti Bracket CT Masa Kerja (12 / 13 / 14 / 15 hari)</span>
               </label>
-              <label class="radio-card">
-                <input type="radio" name="departureMode" value="leave_after_day5" />
-                <span id="labelDepartAfter5">Berangkat setelah hari kerja ke-5 berakhir (Hari ke-6 jadi OFF, jatah C berkurang 1)</span>
+            </div>
+            <div class="field span-2">
+              <div class="field-hint" id="bjlTenureHint"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BJL CARD 2: SIKLUS ROSTER, POLA KERJA & CUTI PERIODIK -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="step-badge">2</span> Siklus Roster, Pola Kerja &amp; Cuti</h2>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="bjlStartDate">Mulai Masuk Site (Hari 1)</label>
+              <input type="date" id="bjlStartDate" />
+            </div>
+            <div class="field">
+              <label for="bjlDefaultCP">Default Cuti Periodik (CP)</label>
+              <input type="number" id="bjlDefaultCP" min="1" max="30" step="1" />
+            </div>
+            <div class="field span-2">
+              <label for="bjlRoster">Siklus Roster (Target Site &amp; Pembagi CE)</label>
+              <select id="bjlRoster"></select>
+            </div>
+            <div class="field span-2">
+              <label for="bjlPattern">Pola Sistem Hari Kerja di Site</label>
+              <select id="bjlPattern"></select>
+            </div>
+            <div class="field">
+              <label for="bjlSiteCountMode">Basis Hitung Target Roster</label>
+              <select id="bjlSiteCountMode">
+                <option value="calendar_site">Hari Kalender di Site (X + OFF)</option>
+                <option value="pure_work">Hari Kerja Fisik Murni (Hanya X)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="bjlCeRounding">Pembulatan Cuti Ekstra (CE)</label>
+              <select id="bjlCeRounding">
+                <option value="round">Standar (Round)</option>
+                <option value="floor">Ke Bawah (Floor)</option>
+                <option value="ceil">Ke Atas (Ceil)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- BJL CARD 3: POH, HARI TRAVEL (TRV) & TAMPILAN -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="step-badge">3</span> P.O.H, Travel (TRV) &amp; Tampilan</h2>
+          </div>
+          <div class="form-grid">
+            <div class="field span-2">
+              <label for="bjlPohCity">Kota P.O.H (Master 26 Kota BJL)</label>
+              <select id="bjlPohCity"></select>
+            </div>
+            <div class="field">
+              <label for="bjlTrv1Placement">Penempatan TRV 1 (Malut Non-Halsel)</label>
+              <select id="bjlTrv1Placement">
+                <option value="depart">Saat Berangkat (1 hr) / Kembali 0</option>
+                <option value="return">Saat Kembali (1 hr) / Berangkat 0</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="bjlViewMode">Rentang Kalender</label>
+              <select id="bjlViewMode">
+                <option value="full_year">1 Tahun Penuh (Jan – Des)</option>
+                <option value="rolling_12">12 Bulan Berjalan (Mulai Bulan Start)</option>
+              </select>
+            </div>
+            <div class="field span-2">
+              <label class="toggle-inline">
+                <input type="checkbox" id="bjlShowHolidays" />
+                <span>Tandai Hari Libur Nasional &amp; Cuti Bersama ID (2025–2027)</span>
+              </label>
+            </div>
+            <div class="field span-2">
+              <div class="field-hint" id="bjlPohHint"></div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- BJL KPI SUMMARY STRIP -->
+      <section class="kpi-strip">
+        <div class="kpi-card">
+          <span class="kpi-label">Hari Kerja (X)</span>
+          <span class="kpi-value" id="bjlKpiWorkVal">0 hr</span>
+          <span class="kpi-sub" id="bjlKpiWorkSub">-</span>
+        </div>
+        <div class="kpi-card kpi-c">
+          <span class="kpi-label">Cuti Periodik (CP)</span>
+          <span class="kpi-value" id="bjlKpiCpVal">0 hr</span>
+          <span class="kpi-sub" id="bjlKpiCpSub">-</span>
+        </div>
+        <div class="kpi-card kpi-bjl-trv">
+          <span class="kpi-label">Hari Travel (TRV)</span>
+          <span class="kpi-value" id="bjlKpiTrvVal">0 hr</span>
+          <span class="kpi-sub" id="bjlKpiTrvSub">-</span>
+        </div>
+        <div class="kpi-card kpi-bjl-ce">
+          <span class="kpi-label">Cuti Ekstra (CE)</span>
+          <span class="kpi-value" id="bjlKpiCeVal">0 hr</span>
+          <span class="kpi-sub" id="bjlKpiCeSub">-</span>
+        </div>
+        <div class="kpi-card kpi-ct">
+          <span class="kpi-label">Cuti Tahunan (CT)</span>
+          <span class="kpi-value" id="bjlKpiCtVal">0 / 12 hr</span>
+          <span class="kpi-sub" id="bjlKpiCtSub">-</span>
+        </div>
+        <div class="kpi-card kpi-bjl-lump">
+          <span class="kpi-label">Est. Lumpsum 12 Bln</span>
+          <span class="kpi-value" id="bjlKpiLumpVal">Rp 0</span>
+          <span class="kpi-sub" id="bjlKpiLumpSub">-</span>
+        </div>
+      </section>
+
+      <!-- BJL DYNAMIC LEGEND -->
+      <section class="legend-bar" id="bjlLegendBar"></section>
+
+      <!-- BJL 12 x 31 TIMESHEET MATRIX -->
+      <section class="card matrix-card">
+        <div class="matrix-header-row">
+          <div>
+            <h2 class="card-title">Matriks Timesheet BJL (12 Bulan × 31 Hari)</h2>
+            <span class="matrix-meta no-print" id="bjlMatrixMeta"></span>
+          </div>
+          <div class="matrix-tools no-print" id="bjlOverrideSummaryWrap" style="display:none;">
+            <span class="override-count-pill" id="bjlOverrideCountText">0 Override</span>
+            <button type="button" class="btn btn-ghost" id="bjlBtnClearOverrides" style="font-size:11.5px;padding:4px 8px;color:#9F1239;">
+              ✕ Reset Semua Override
+            </button>
+          </div>
+        </div>
+
+        <div class="matrix-wrap">
+          <table class="matrix-table" id="bjlMatrixTable"></table>
+        </div>
+
+        <!-- BJL CELL INSPECTOR & QUICK OVERRIDE -->
+        <div class="inspector-bar no-print" id="bjlInspectorBar"></div>
+      </section>
+
+      <!-- BJL CYCLES SUMMARY, EXTEND/CE, CT & LUMPSUM BREAKDOWN -->
+      <section class="card">
+        <div class="card-header" style="flex-wrap:wrap;">
+          <h2 class="card-title">Ringkasan Periode Cuti, Extend (CE), Kunci History, CT &amp; Rincian Lumpsum</h2>
+          <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-ghost" id="bjlBtnUnlockAll" style="font-size:11.5px;padding:4px 8px;">
+              🔓 Buka Semua Kunci
+            </button>
+            <button type="button" class="btn btn-ghost" id="bjlBtnClearCycleCustom" style="font-size:11.5px;padding:4px 8px;">
+              Reset Extend &amp; CP Custom
+            </button>
+            <button type="button" class="btn btn-ghost" id="bjlBtnClearCT" style="font-size:11.5px;padding:4px 8px;">
+              Reset Alokasi CT
+            </button>
+          </div>
+        </div>
+
+        <div class="cycles-table-wrap">
+          <table class="cycles-table">
+            <thead>
+              <tr>
+                <th>Periode &amp; Kunci</th>
+                <th>Rentang On-Site</th>
+                <th>Berangkat &amp; Kembali</th>
+                <th>Extend Site → CE</th>
+                <th>Cuti Periodik (CP)</th>
+                <th>Tambah CT</th>
+                <th>POH &amp; Tiket</th>
+                <th>Lumpsum Berangkat (Hijau)</th>
+                <th>Lumpsum Kembali (Oranye)</th>
+              </tr>
+            </thead>
+            <tbody id="bjlCyclesTbody"></tbody>
+          </table>
+        </div>
+
+        <div class="bjl-terms-card">
+          <h3>Ketentuan Pemberian Uang Lumpsum (Term &amp; Condition)</h3>
+          <ol class="bjl-terms-list" id="bjlLumpsumTermsList"></ol>
+        </div>
+      </section>
+
+      <!-- PRINT-ONLY SIGNATURE BLOCK (BJL) -->
+      <section class="print-only">
+        <div class="print-signatures" id="bjlPrintSignatures"></div>
+      </section>
+
+      <footer class="footer-note no-print">
+        PT Baja Jaya Lestari (BJL) • Timesheet, Leave &amp; Lumpsum Simulator v3.0 • Master tarif Lumpsum &amp; aturan SOP tersedia di <code>config.js</code> dan dapat dikustomisasi lewat menu <strong>Tarif Lumpsum</strong> &amp; <strong>Tanda Tangan</strong>.
+      </footer>
+    </main>
+
+    <!-- ================================================================== -->
+    <!-- WORKSPACE 2: PT KALIMANTAN AGRO NUSANTARA (KAN) — 100% UTUH v2.0   -->
+    <!-- ================================================================== -->
+    <main class="container workspace-section" id="workspaceKAN">
+
+      <!-- PRINT-ONLY FORMAL HEADER (KAN) -->
+      <section class="print-only">
+        <div class="print-header">
+          <div>
+            <h1 id="printCompanyTitle">PT Kalimantan Agro Nusantara (KAN)</h1>
+            <p id="printSubtitle">Simulasi Roster 5:2 &amp; Rencana Pengambilan Cuti</p>
+          </div>
+          <div style="text-align:right;font-size:9px;color:#64748B;">
+            Dokumen Simulasi Roster Karyawan (v3.0)
+          </div>
+        </div>
+        <div class="print-emp-bar" id="printEmpBar"></div>
+      </section>
+
+      <!-- KAN CONTROLS PANEL (3 CARDS) -->
+      <section class="controls-grid no-print">
+
+        <!-- CARD 1: PROFIL, P.O.H & SALDO AWAL -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="step-badge">1</span> Profil Karyawan, P.O.H &amp; Saldo</h2>
+          </div>
+          <div class="form-grid">
+            <div class="field span-2">
+              <label for="inputName">Nama Karyawan</label>
+              <input type="text" id="inputName" placeholder="Nama lengkap karyawan" />
+            </div>
+            <div class="field">
+              <label for="inputNik">NIK / ID</label>
+              <input type="text" id="inputNik" placeholder="KAN-2025-XXXX" />
+            </div>
+            <div class="field">
+              <label for="inputGrade">Kategori Jabatan</label>
+              <select id="inputGrade"></select>
+            </div>
+            <div class="field span-2">
+              <label for="inputRole">Jabatan / Divisi</label>
+              <input type="text" id="inputRole" placeholder="Asisten / Staff Site" />
+            </div>
+            <div class="field">
+              <label for="inputPohCategory">Kategori P.O.H</label>
+              <select id="inputPohCategory"></select>
+            </div>
+            <div class="field">
+              <label for="inputPohCity">Kota / Bandara P.O.H</label>
+              <input type="text" id="inputPohCity" placeholder="Misal: Surabaya (SUB)" />
+            </div>
+            <div class="field">
+              <label for="inputJoinDate">Tanggal Masuk (Join Date)</label>
+              <input type="date" id="inputJoinDate" />
+            </div>
+            <div class="field">
+              <label for="inputCtBalance">Saldo Cuti Tahunan (CT)</label>
+              <input type="number" id="inputCtBalance" min="0" max="60" step="1" />
+            </div>
+            <div class="field span-2">
+              <label for="inputInitialTc">Saldo Awal TC (Carry-Over Periode Lalu)</label>
+              <input type="number" id="inputInitialTc" min="0" max="30" step="1" />
+            </div>
+            <div class="field span-2">
+              <div class="field-hint" id="joinDateHint"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 2: JADWAL MULAI & ATURAN SIKLUS -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="step-badge">2</span> Jadwal Mulai &amp; Durasi Cuti</h2>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="inputStartDate" id="labelStartX1">Mulai Kerja (X1) di Site</label>
+              <input type="date" id="inputStartDate" />
+            </div>
+            <div class="field">
+              <label for="inputHomeDays">Default Hari di Rumah</label>
+              <input type="number" id="inputHomeDays" min="9" max="30" step="1" />
+            </div>
+            <div class="field span-2">
+              <label>Preset Durasi Cuti Default</label>
+              <div class="preset-row" id="presetRow"></div>
+              <div class="field-hint" id="labelMinDaysHint">Kunci minimal SOP: 9 hari. Durasi tiap periode juga bisa diubah berbeda &amp; dikunci di tabel bawah.</div>
+            </div>
+            <div class="field span-2">
+              <label for="inputOffDay">Hari OFF Mingguan Departemen</label>
+              <select id="inputOffDay"></select>
+            </div>
+            <div class="field span-2">
+              <div class="field-hint" id="pohRuleHint"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 3: OPSI KEBERANGKATAN & TAMPILAN -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="step-badge">3</span> Opsi Keberangkatan &amp; Tampilan</h2>
+          </div>
+          <div class="form-grid">
+            <div class="field span-2">
+              <label>Skenario Keberangkatan Minggu Terakhir</label>
+              <div class="radio-stack">
+                <label class="radio-card">
+                  <input type="radio" name="departureMode" value="work_day6" />
+                  <span id="labelDepartWork6">Masuk kerja penuh di hari ke-6 (TC terakhir terbit)</span>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="departureMode" value="leave_after_day5" />
+                  <span id="labelDepartAfter5">Berangkat setelah hari kerja ke-5 berakhir (Hari ke-6 jadi OFF, jatah C berkurang 1)</span>
+                </label>
+              </div>
+            </div>
+            <div class="field">
+              <label for="inputCounterMode">Gaya Penomoran Hari Kerja</label>
+              <select id="inputCounterMode"></select>
+            </div>
+            <div class="field">
+              <label for="inputGrayMode">Jeda Pasca-Cuti</label>
+              <select id="inputGrayMode"></select>
+            </div>
+            <div class="field">
+              <label for="inputViewMode">Rentang Kalender</label>
+              <select id="inputViewMode"></select>
+            </div>
+            <div class="field">
+              <label for="inputShowHolidays">Hari Libur Nasional</label>
+              <label class="toggle-inline">
+                <input type="checkbox" id="inputShowHolidays" />
+                <span>Tandai Tanggal Merah ID</span>
               </label>
             </div>
           </div>
-          <div class="field">
-            <label for="inputCounterMode">Gaya Penomoran Hari Kerja</label>
-            <select id="inputCounterMode"></select>
+        </div>
+
+      </section>
+
+      <!-- KAN KPI SUMMARY STRIP -->
+      <section class="kpi-strip">
+        <div class="kpi-card">
+          <span class="kpi-label" id="kpiWorkLabel">Hari Kerja</span>
+          <span class="kpi-value" id="kpiWorkVal">0 hr</span>
+          <span class="kpi-sub" id="kpiWorkSub">-</span>
+        </div>
+        <div class="kpi-card kpi-tc">
+          <span class="kpi-label" id="kpiTcLabel">Tabungan TC</span>
+          <span class="kpi-value" id="kpiTcVal">0 hr</span>
+          <span class="kpi-sub" id="kpiTcSub">-</span>
+        </div>
+        <div class="kpi-card kpi-c">
+          <span class="kpi-label" id="kpiLeaveLabel">Cuti C</span>
+          <span class="kpi-value" id="kpiLeaveVal">0 hr</span>
+          <span class="kpi-sub" id="kpiLeaveSub">-</span>
+        </div>
+        <div class="kpi-card kpi-ct">
+          <span class="kpi-label" id="kpiCtLabel">Cuti Tahunan</span>
+          <span class="kpi-value" id="kpiCtVal">0 hr</span>
+          <span class="kpi-sub" id="kpiCtSub">-</span>
+        </div>
+        <div class="kpi-card kpi-tk">
+          <span class="kpi-label" id="kpiTicketLabel">Kuota Tiket</span>
+          <span class="kpi-value" id="kpiTicketVal">0 / 3</span>
+          <span class="kpi-sub" id="kpiTicketSub">-</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label" id="kpiServiceLabel">Status Hak CT</span>
+          <span class="kpi-value" id="kpiServiceVal">-</span>
+          <span class="kpi-sub" id="kpiServiceSub">-</span>
+        </div>
+      </section>
+
+      <!-- KAN DYNAMIC LEGEND -->
+      <section class="legend-bar" id="legendBar"></section>
+
+      <!-- KAN 12 x 31 TIMESHEET MATRIX -->
+      <section class="card matrix-card">
+        <div class="matrix-header-row">
+          <div>
+            <h2 class="card-title">Matriks Timesheet 12 Bulan × 31 Hari</h2>
+            <span class="matrix-meta no-print" id="matrixMeta"></span>
           </div>
-          <div class="field">
-            <label for="inputGrayMode">Jeda Pasca-Cuti</label>
-            <select id="inputGrayMode"></select>
-          </div>
-          <div class="field">
-            <label for="inputViewMode">Rentang Kalender</label>
-            <select id="inputViewMode"></select>
-          </div>
-          <div class="field">
-            <label for="inputShowHolidays">Hari Libur Nasional</label>
-            <label class="toggle-inline">
-              <input type="checkbox" id="inputShowHolidays" />
-              <span>Tandai Tanggal Merah ID</span>
-            </label>
+          <div class="matrix-tools no-print" id="overrideSummaryWrap" style="display:none;">
+            <span class="override-count-pill" id="overrideCountText">0 Override</span>
+            <button type="button" class="btn btn-ghost" id="btnClearOverrides" style="font-size:11.5px;padding:4px 8px;color:#9F1239;">
+              ✕ Reset Semua Override
+            </button>
           </div>
         </div>
-      </div>
 
-    </section>
-
-    <!-- KPI SUMMARY STRIP -->
-    <section class="kpi-strip">
-      <div class="kpi-card">
-        <span class="kpi-label" id="kpiWorkLabel">Hari Kerja</span>
-        <span class="kpi-value" id="kpiWorkVal">0 hr</span>
-        <span class="kpi-sub" id="kpiWorkSub">-</span>
-      </div>
-      <div class="kpi-card kpi-tc">
-        <span class="kpi-label" id="kpiTcLabel">Tabungan TC</span>
-        <span class="kpi-value" id="kpiTcVal">0 hr</span>
-        <span class="kpi-sub" id="kpiTcSub">-</span>
-      </div>
-      <div class="kpi-card kpi-c">
-        <span class="kpi-label" id="kpiLeaveLabel">Cuti C</span>
-        <span class="kpi-value" id="kpiLeaveVal">0 hr</span>
-        <span class="kpi-sub" id="kpiLeaveSub">-</span>
-      </div>
-      <div class="kpi-card kpi-ct">
-        <span class="kpi-label" id="kpiCtLabel">Cuti Tahunan</span>
-        <span class="kpi-value" id="kpiCtVal">0 hr</span>
-        <span class="kpi-sub" id="kpiCtSub">-</span>
-      </div>
-      <div class="kpi-card kpi-tk">
-        <span class="kpi-label" id="kpiTicketLabel">Kuota Tiket</span>
-        <span class="kpi-value" id="kpiTicketVal">0 / 3</span>
-        <span class="kpi-sub" id="kpiTicketSub">-</span>
-      </div>
-      <div class="kpi-card">
-        <span class="kpi-label" id="kpiServiceLabel">Status Hak CT</span>
-        <span class="kpi-value" id="kpiServiceVal">-</span>
-        <span class="kpi-sub" id="kpiServiceSub">-</span>
-      </div>
-    </section>
-
-    <!-- DYNAMIC LEGEND -->
-    <section class="legend-bar" id="legendBar"></section>
-
-    <!-- 12 x 31 TIMESHEET MATRIX -->
-    <section class="card matrix-card">
-      <div class="matrix-header-row">
-        <div>
-          <h2 class="card-title">Matriks Timesheet 12 Bulan × 31 Hari</h2>
-          <span class="matrix-meta no-print" id="matrixMeta"></span>
+        <div class="matrix-wrap">
+          <table class="matrix-table" id="matrixTable"></table>
         </div>
-        <div class="matrix-tools no-print" id="overrideSummaryWrap" style="display:none;">
-          <span class="override-count-pill" id="overrideCountText">0 Override</span>
-          <button type="button" class="btn btn-ghost" id="btnClearOverrides" style="font-size:11.5px;padding:4px 8px;color:#9F1239;">
-            ✕ Reset Semua Override
-          </button>
+
+        <!-- SELECTED CELL INSPECTOR & QUICK OVERRIDE CONTROLS -->
+        <div class="inspector-bar no-print" id="inspectorBar"></div>
+      </section>
+
+      <!-- KAN CYCLES SUMMARY, LOCK PERIODE, CARRY-OVER TC & ANNUAL LEAVE ALLOCATOR -->
+      <section class="card">
+        <div class="card-header" style="flex-wrap:wrap;">
+          <h2 class="card-title">Ringkasan Periode Cuti, Kunci History, Durasi Fleksibel, Carry-Over TC &amp; CT</h2>
+          <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-ghost" id="btnUnlockAll" style="font-size:11.5px;padding:4px 8px;">
+              🔓 Buka Semua Kunci
+            </button>
+            <button type="button" class="btn btn-ghost" id="btnClearCycleCustom" style="font-size:11.5px;padding:4px 8px;">
+              Reset Durasi &amp; Simpan TC
+            </button>
+            <button type="button" class="btn btn-ghost" id="btnClearCT" style="font-size:11.5px;padding:4px 8px;">
+              Reset Alokasi CT
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div class="matrix-wrap">
-        <table class="matrix-table" id="matrixTable"></table>
-      </div>
-
-      <!-- SELECTED CELL INSPECTOR & QUICK OVERRIDE CONTROLS -->
-      <div class="inspector-bar no-print" id="inspectorBar"></div>
-    </section>
-
-    <!-- CYCLES SUMMARY, LOCK PERIODE, CARRY-OVER TC & ANNUAL LEAVE ALLOCATOR -->
-    <section class="card">
-      <div class="card-header" style="flex-wrap:wrap;">
-        <h2 class="card-title">Ringkasan Periode Cuti, Kunci History, Durasi Fleksibel, Carry-Over TC &amp; CT</h2>
-        <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button type="button" class="btn btn-ghost" id="btnUnlockAll" style="font-size:11.5px;padding:4px 8px;">
-            🔓 Buka Semua Kunci
-          </button>
-          <button type="button" class="btn btn-ghost" id="btnClearCycleCustom" style="font-size:11.5px;padding:4px 8px;">
-            Reset Durasi &amp; Simpan TC
-          </button>
-          <button type="button" class="btn btn-ghost" id="btnClearCT" style="font-size:11.5px;padding:4px 8px;">
-            Reset Alokasi CT
-          </button>
+        <div class="cycles-table-wrap">
+          <table class="cycles-table">
+            <thead>
+              <tr>
+                <th>Periode &amp; Kunci</th>
+                <th>Rentang Kerja di Site</th>
+                <th>Tanggal Berangkat</th>
+                <th>Akhir Cuti &amp; Kembali</th>
+                <th>Durasi di Rumah (Fleksibel)</th>
+                <th>Carry-Over / Simpan TC</th>
+                <th>Tambah CT</th>
+                <th>Status Tiket / P.O.H</th>
+              </tr>
+            </thead>
+            <tbody id="cyclesTbody"></tbody>
+          </table>
         </div>
-      </div>
+      </section>
 
-      <div class="cycles-table-wrap">
-        <table class="cycles-table">
-          <thead>
-            <tr>
-              <th>Periode &amp; Kunci</th>
-              <th>Rentang Kerja di Site</th>
-              <th>Tanggal Berangkat</th>
-              <th>Akhir Cuti &amp; Kembali</th>
-              <th>Durasi di Rumah (Fleksibel)</th>
-              <th>Carry-Over / Simpan TC</th>
-              <th>Tambah CT</th>
-              <th>Status Tiket / P.O.H</th>
-            </tr>
-          </thead>
-          <tbody id="cyclesTbody"></tbody>
-        </table>
-      </div>
-    </section>
+      <!-- PRINT-ONLY SIGNATURE BLOCK (KAN) -->
+      <section class="print-only">
+        <div class="print-signatures" id="printSignatures"></div>
+      </section>
 
-    <!-- PRINT-ONLY SIGNATURE BLOCK -->
-    <section class="print-only">
-      <div class="print-signatures" id="printSignatures"></div>
-    </section>
+      <footer class="footer-note no-print">
+        PT Kalimantan Agro Nusantara (KAN) • Timesheet &amp; Leave Simulator v3.0 • Ubah kode, SOP, P.O.H, hari libur nasional, dan aturan override di <code>config.js</code>.
+      </footer>
+    </main>
 
-    <footer class="footer-note no-print">
-      KAN Timesheet Simulator v2.0 • Ubah kode, SOP, P.O.H, tanda tangan, hari libur nasional, dan aturan override di <code>config.js</code> tanpa menyentuh kode inti.
-    </footer>
+  </div><!-- /#appShell -->
 
-  </main>
+  <!-- ==================== MODALS ==================== -->
 
-  <!-- SCENARIO MANAGER MODAL -->
+  <!-- 1. KAN SCENARIO MANAGER MODAL -->
   <div class="modal-backdrop no-print" id="scenarioModal" role="dialog" aria-modal="true" aria-labelledby="scenarioModalTitle">
     <div class="modal">
       <div class="modal-head">
-        <h3 id="scenarioModalTitle">💾 Kelola Skenario &amp; Bagikan Simulasi</h3>
+        <h3 id="scenarioModalTitle">💾 Kelola Skenario PT KAN &amp; Bagikan Simulasi</h3>
         <button type="button" class="btn btn-ghost" id="btnCloseScenario">✕ Tutup</button>
       </div>
       <div class="modal-body">
         <div class="scenario-section">
-          <label class="scenario-label" for="inputScenarioName">Simpan Skenario Aktif ke Browser</label>
+          <label class="scenario-label" for="inputScenarioName">Simpan Skenario KAN ke Browser</label>
           <div class="scenario-save-row">
             <input type="text" id="inputScenarioName" placeholder="Misal: Budi Santoso - P1 9hr (Kunci) + P2 11hr" />
             <button type="button" class="btn btn-primary" id="btnSaveScenario">Simpan</button>
           </div>
         </div>
-
         <div class="scenario-section">
-          <div class="scenario-label">Skenario Tersimpan</div>
+          <div class="scenario-label">Skenario KAN Tersimpan</div>
           <div id="scenarioList" class="scenario-list"></div>
         </div>
-
         <div class="scenario-section scenario-io-box">
           <div class="scenario-label">Export / Import File JSON &amp; Link Bagikan</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
@@ -321,24 +643,144 @@
             <button type="button" class="btn btn-primary" id="btnCopyShareFromModal">🔗 Salin Link Simulasi</button>
             <input type="file" id="inputImportJsonFile" accept=".json,application/json" style="display:none;" />
           </div>
-          <p style="margin:8px 0 0;font-size:11.5px;color:#64748B;">
-            File JSON dan Link Bagikan menyimpan profil + P.O.H, periode yang dikunci, carry-over TC, durasi custom tiap periode, alokasi CT, dan override manual (S/I/DL/A).
-          </p>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- CONFIG PREVIEW MODAL -->
-  <div class="modal-backdrop no-print" id="configModal" role="dialog" aria-modal="true" aria-labelledby="configModalTitle">
+  <!-- 2. BJL SCENARIO MANAGER MODAL -->
+  <div class="modal-backdrop no-print" id="bjlScenarioModal" role="dialog" aria-modal="true" aria-labelledby="bjlScenarioModalTitle">
     <div class="modal">
+      <div class="modal-head">
+        <h3 id="bjlScenarioModalTitle">💾 Kelola Skenario PT BJL &amp; Bagikan Simulasi</h3>
+        <button type="button" class="btn btn-ghost" id="bjlBtnCloseScenario">✕ Tutup</button>
+      </div>
+      <div class="modal-body">
+        <div class="scenario-section">
+          <label class="scenario-label" for="bjlInputScenarioName">Simpan Skenario BJL ke Browser</label>
+          <div class="scenario-save-row">
+            <input type="text" id="bjlInputScenarioName" placeholder="Misal: Andi Wijaya - X63 Pola 13:1 POH Surabaya" />
+            <button type="button" class="btn btn-primary" id="bjlBtnSaveScenario">Simpan</button>
+          </div>
+        </div>
+        <div class="scenario-section">
+          <div class="scenario-label">Skenario BJL Tersimpan</div>
+          <div id="bjlScenarioList" class="scenario-list"></div>
+        </div>
+        <div class="scenario-section scenario-io-box">
+          <div class="scenario-label">Export / Import File JSON &amp; Link Bagikan (Termasuk Tarif Lumpsum Custom)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">
+            <button type="button" class="btn btn-soft" id="bjlBtnExportJson">⬇️ Download JSON</button>
+            <button type="button" class="btn" id="bjlBtnImportJson">⬆️ Muat File JSON</button>
+            <button type="button" class="btn btn-primary" id="bjlBtnCopyShareFromModal">🔗 Salin Link Simulasi</button>
+            <input type="file" id="bjlImportJsonFile" accept=".json,application/json" style="display:none;" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. BJL LUMPSUM MASTER & CUSTOM RATE EDITOR MODAL -->
+  <div class="modal-backdrop no-print" id="lumpsumModal" role="dialog" aria-modal="true" aria-labelledby="lumpsumModalTitle">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h3 id="lumpsumModalTitle">💰 Master &amp; Input Mandiri Tarif Uang Lumpsum (PT BJL)</h3>
+        <button type="button" class="btn btn-ghost" id="btnCloseLumpsum">✕ Tutup</button>
+      </div>
+      <div class="modal-body">
+        <div class="lumpsum-toolbar">
+          <div class="field">
+            <label for="lumpsumGroupSelect">Pilih Grup Grade</label>
+            <select id="lumpsumGroupSelect"></select>
+          </div>
+          <div class="field">
+            <label for="lumpsumCitySearch">Cari Kota POH</label>
+            <input type="text" id="lumpsumCitySearch" placeholder="Ketik nama kota (misal: Surabaya, Ternate)..." />
+          </div>
+          <div class="field" style="flex:0 0 auto;min-width:auto;">
+            <label>Salin Referensi</label>
+            <div style="display:flex;gap:6px;">
+              <select id="lumpsumCopyFrom" style="width:155px;">
+                <option value="">Salin dari grup...</option>
+                <option value="G1">G1 (X1–X3)</option>
+                <option value="G2">G2 (P5, M5–M7)</option>
+                <option value="G3">G3 (S4, P3–P4, M3–M4)</option>
+                <option value="G4">G4 (S1–S3, P1–P2, M1–M2)</option>
+              </select>
+              <button type="button" class="btn btn-soft" id="btnLumpsumCopyApply">Salin</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-hint" id="lumpsumEditorNote" style="margin-bottom:10px;"></div>
+
+        <div class="lumpsum-table-wrap">
+          <table class="lumpsum-editor-table">
+            <thead>
+              <tr>
+                <th>Kota POH</th>
+                <th>Zona TRV</th>
+                <th class="th-go">Berangkat: Site–Tte</th>
+                <th class="th-go">Berangkat: Tte–POH</th>
+                <th class="th-go">Total Berangkat</th>
+                <th class="th-back">Kembali: POH–Tte</th>
+                <th class="th-back">Kembali: Tte–Site</th>
+                <th class="th-back">Total Kembali</th>
+              </tr>
+            </thead>
+            <tbody id="lumpsumEditorTbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost" id="btnLumpsumResetGroup" style="color:#B91C1C;">↺ Reset Grup Ini ke Default</button>
+          <button type="button" class="btn btn-ghost" id="btnLumpsumResetAll" style="color:#B91C1C;">Reset Semua Override</button>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn" id="btnCancelLumpsum">Batal</button>
+          <button type="button" class="btn btn-primary" id="btnSaveLumpsum">💾 Simpan Tarif Grup Ini</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. PDF SIGNATURE BLOCK EDITOR MODAL (KAN & BJL) -->
+  <div class="modal-backdrop no-print" id="signatureModal" role="dialog" aria-modal="true" aria-labelledby="signatureModalTitle">
+    <div class="modal modal-med">
+      <div class="modal-head">
+        <h3 id="signatureModalTitle">✍️ Atur Blok Tanda Tangan Cetak PDF</h3>
+        <button type="button" class="btn btn-ghost" id="btnCloseSignatures">✕ Tutup</button>
+      </div>
+      <div class="modal-body">
+        <p style="margin:0 0 10px;font-size:12.5px;color:#475569;" id="signatureModalDesc">
+          Sesuaikan urutan, label persetujuan, jabatan, dan nama penanda tangan untuk dokumen cetak PDF A4 Landscape.
+        </p>
+        <div class="sig-editor-list" id="sigEditorList"></div>
+        <div style="margin-top:10px;">
+          <button type="button" class="btn btn-soft" id="btnAddSignatureRow">＋ Tambah Kolom Tanda Tangan</button>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" id="btnResetSignatures" style="color:#B91C1C;">↺ Kembalikan ke Default SOP</button>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn" id="btnCancelSignatures">Batal</button>
+          <button type="button" class="btn btn-primary" id="btnSaveSignatures">💾 Simpan Susunan</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. CONFIG PREVIEW MODAL -->
+  <div class="modal-backdrop no-print" id="configModal" role="dialog" aria-modal="true" aria-labelledby="configModalTitle">
+    <div class="modal modal-med">
       <div class="modal-head">
         <h3 id="configModalTitle">Konfigurasi Aktif (config.js)</h3>
         <button type="button" class="btn btn-ghost" id="btnCloseConfig">✕ Tutup</button>
       </div>
       <div class="modal-body">
         <p style="margin-top:0;color:#475569;font-size:12.5px;">
-          Semua parameter di bawah dibaca langsung dari <code>window.KAN_CONFIG</code> di file <strong>config.js</strong>.
+          Semua parameter di bawah dibaca langsung dari <strong>config.js</strong> untuk perusahaan yang sedang aktif.
         </p>
         <pre class="code-preview" id="configPreviewCode"></pre>
       </div>
@@ -348,9 +790,11 @@
   <!-- TOAST NOTIFICATION -->
   <div class="toast no-print" id="toast" role="status" aria-live="polite"></div>
 
-  <!-- ExcelJS CDN -->
+  <!-- SCRIPTS: ExcelJS -> config.js -> kan-module.js -> bjl-module.js -> app.js -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <script src="./config.js"></script>
+  <script src="./kan-module.js"></script>
+  <script src="./bjl-module.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

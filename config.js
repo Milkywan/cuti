@@ -1,5 +1,21 @@
 /**
  * ============================================================================
+ * MULTI-COMPANY TIMESHEET & LEAVE SIMULATOR — CONFIGURATION (config.js v3.0)
+ * ============================================================================
+ * Mendukung 2 Entitas Perusahaan:
+ *   1. PT Kalimantan Agro Nusantara (KAN) — Roster 5:2, TC, Carry-Over & POH
+ *   2. PT Baja Jaya Lestari (BJL)         — Roster X56/X63/X70, Pola 13:1/6:1/2:1,
+ *      Cuti Periodik 14 hr, Cuti Ekstra (pembagi 4 / 4,5 / 5), TRV 0/1/2,
+ *      Bracket CT Masa Kerja (12-15 hr), POH SOP BJL-H-SOP-HRGA-005T & Lumpsum.
+ *
+ * Tips:
+ * - Ubah akun login, aturan SOP, tarif Lumpsum, atau blok tanda tangan di sini.
+ * - Setelah mengubah nilai, simpan file lalu refresh browser (Ctrl+F5).
+ * ============================================================================
+ */
+
+/**
+ * ============================================================================
  * KAN TIMESHEET & LEAVE SIMULATOR — CONFIGURATION FILE (config.js) v2.0.0
  * ============================================================================
  * Pusat seluruh variabel lapangan, kode matriks, aturan SOP, P.O.H (Point of Hire),
@@ -326,4 +342,1786 @@ window.KAN_CONFIG = {
     { title: 'Diketahui Oleh,', role: 'Atasan Langsung' },
     { title: 'Disetujui Oleh,', role: 'HR Manager' }
   ]
+};
+
+
+// Update versi KAN ke 3.0.0 agar sinkron
+if (window.KAN_CONFIG && window.KAN_CONFIG.app) {
+  window.KAN_CONFIG.app.version = '3.0.0';
+}
+
+window.BJL_CONFIG = {
+  "app": {
+    "title": "BJL Timesheet, Leave & Lumpsum Simulator",
+    "subtitle": "Simulasi Roster Site BJL (X56/X63/X70), Pola 13:1/6:1/2:1, Cuti Periodik, Cuti Ekstra, TRV, CT & Lumpsum",
+    "companyName": "PT Baja Jaya Lestari (BJL)",
+    "siteLocation": "Smelter Site Kawasi (Pulau Obi)",
+    "sopRef": "BJL-H-SOP-HRGA-005T (Rev.0)",
+    "version": "3.0.0"
+  },
+  "codes": {
+    "work": "X",
+    "off": "OFF",
+    "trvDepart": "TRV",
+    "trvReturn": "TRV",
+    "periodicLeave": "CP",
+    "extraLeave": "CE",
+    "annualLeave": "CT",
+    "preStart": "",
+    "nonDate": ""
+  },
+  "rosters": {
+    "X56": {
+      "code": "X56",
+      "label": "X56 — SPT (Superintendent)",
+      "roleHint": "SPT",
+      "siteDays": 56,
+      "periodicLeaveDays": 14,
+      "extraLeaveDivisor": 4
+    },
+    "X63": {
+      "code": "X63",
+      "label": "X63 — SPV (Supervisor)",
+      "roleHint": "SPV",
+      "siteDays": 63,
+      "periodicLeaveDays": 14,
+      "extraLeaveDivisor": 4.5
+    },
+    "X70": {
+      "code": "X70",
+      "label": "X70 — Non-SPV & Non-SPT",
+      "roleHint": "Selain SPV & SPT",
+      "siteDays": 70,
+      "periodicLeaveDays": 14,
+      "extraLeaveDivisor": 5
+    }
+  },
+  "workPatterns": {
+    "13:1": {
+      "label": "Pola 13:1 (13 Kerja, 1 OFF Site)",
+      "workDays": 13,
+      "offDays": 1
+    },
+    "6:1": {
+      "label": "Pola 6:1 (6 Kerja, 1 OFF Site)",
+      "workDays": 6,
+      "offDays": 1
+    },
+    "2:1": {
+      "label": "Pola 2:1 (2 Kerja, 1 OFF Site)",
+      "workDays": 2,
+      "offDays": 1
+    }
+  },
+  "trvZones": {
+    "halsel_malut": {
+      "label": "POH Halsel Malut (TRV 0 — Tanpa Tiket Pesawat)",
+      "shortLabel": "Halsel Malut",
+      "trvDays": 0,
+      "trvDepart": 0,
+      "trvReturn": 0,
+      "hasFlightTicket": false,
+      "ticketLabel": "Non-Tiket Pesawat (Darat/Laut Lokal)"
+    },
+    "malut_non_halsel": {
+      "label": "POH Malut Non-Halsel (TRV 1 — Tanpa Tiket Pesawat)",
+      "shortLabel": "Malut Non-Halsel",
+      "trvDays": 1,
+      "trvDepart": 1,
+      "trvReturn": 0,
+      "hasFlightTicket": false,
+      "ticketLabel": "Non-Tiket Pesawat (Laut/Ferry Ternate)"
+    },
+    "non_malut": {
+      "label": "POH Non-Malut (TRV 2 — Dapat Tiket Pesawat)",
+      "shortLabel": "Non-Malut (Pesawat)",
+      "trvDays": 2,
+      "trvDepart": 1,
+      "trvReturn": 1,
+      "hasFlightTicket": true,
+      "ticketLabel": "Tiket Pesawat Perusahaan (PP)"
+    }
+  },
+  "ctBrackets": [
+    {
+      "minYears": 0,
+      "maxYears": 4,
+      "days": 12,
+      "label": "0 s/d < 4 tahun (12 hari)"
+    },
+    {
+      "minYears": 4,
+      "maxYears": 7,
+      "days": 13,
+      "label": ">= 4 s/d < 7 tahun (13 hari)"
+    },
+    {
+      "minYears": 7,
+      "maxYears": 10,
+      "days": 14,
+      "label": ">= 7 s/d < 10 tahun (14 hari)"
+    },
+    {
+      "minYears": 10,
+      "maxYears": 999,
+      "days": 15,
+      "label": ">= 10 tahun (15 hari)"
+    }
+  ],
+  "grades": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "P1",
+    "P2",
+    "P3",
+    "P4",
+    "P5",
+    "P6",
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M6",
+    "M7",
+    "M8",
+    "X1",
+    "X2",
+    "X3",
+    "Y",
+    "Z"
+  ],
+  "gradeToLumpsumGroup": {
+    "X1": "G1",
+    "X2": "G1",
+    "X3": "G1",
+    "P5": "G2",
+    "M5": "G2",
+    "M6": "G2",
+    "M7": "G2",
+    "S4": "G3",
+    "P3": "G3",
+    "P4": "G3",
+    "M3": "G3",
+    "M4": "G3",
+    "S1": "G4",
+    "S2": "G4",
+    "S3": "G4",
+    "P1": "G4",
+    "P2": "G4",
+    "M1": "G4",
+    "M2": "G4",
+    "P6": "CUSTOM_P6",
+    "M8": "CUSTOM_M8",
+    "Y": "CUSTOM_Y",
+    "Z": "CUSTOM_Z"
+  },
+  "lumpsumGroups": {
+    "G1": {
+      "label": "X1, X2, X3",
+      "isCustom": false
+    },
+    "G2": {
+      "label": "P5, M5, M6, M7",
+      "isCustom": false
+    },
+    "G3": {
+      "label": "S4, P3, P4, M3, M4",
+      "isCustom": false
+    },
+    "G4": {
+      "label": "S1, S2, S3, P1, P2, M1, M2",
+      "isCustom": false
+    },
+    "CUSTOM_P6": {
+      "label": "Grade P6 (Input Mandiri)",
+      "isCustom": true
+    },
+    "CUSTOM_M8": {
+      "label": "Grade M8 (Input Mandiri)",
+      "isCustom": true
+    },
+    "CUSTOM_Y": {
+      "label": "Grade Y (Input Mandiri)",
+      "isCustom": true
+    },
+    "CUSTOM_Z": {
+      "label": "Grade Z (Input Mandiri)",
+      "isCustom": true
+    }
+  },
+  "pohCities": [
+    {
+      "name": "Kawasi",
+      "region": "Maluku Utara (Halsel)",
+      "zone": "halsel_malut",
+      "depart": {
+        "G1": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G2": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G3": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G2": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G3": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G4": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        }
+      }
+    },
+    {
+      "name": "Kawasi ( KTP Lingkar Obi )",
+      "region": "Maluku Utara (Halsel)",
+      "zone": "halsel_malut",
+      "depart": {
+        "G1": {
+          "leg1": 0,
+          "leg2": 150000,
+          "total": 150000
+        },
+        "G2": {
+          "leg1": 0,
+          "leg2": 150000,
+          "total": 150000
+        },
+        "G3": {
+          "leg1": 0,
+          "leg2": 150000,
+          "total": 150000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 150000,
+          "total": 150000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 150000,
+          "leg2": 0,
+          "total": 150000
+        },
+        "G2": {
+          "leg1": 150000,
+          "leg2": 0,
+          "total": 150000
+        },
+        "G3": {
+          "leg1": 150000,
+          "leg2": 0,
+          "total": 150000
+        },
+        "G4": {
+          "leg1": 150000,
+          "leg2": 0,
+          "total": 150000
+        }
+      }
+    },
+    {
+      "name": "Bacan",
+      "region": "Maluku Utara (Halsel)",
+      "zone": "halsel_malut",
+      "depart": {
+        "G1": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G2": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G3": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G2": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G3": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G4": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        }
+      }
+    },
+    {
+      "name": "Labuha",
+      "region": "Maluku Utara (Halsel)",
+      "zone": "halsel_malut",
+      "depart": {
+        "G1": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G2": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G3": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 30000,
+          "total": 30000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G2": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G3": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        },
+        "G4": {
+          "leg1": 30000,
+          "leg2": 0,
+          "total": 30000
+        }
+      }
+    },
+    {
+      "name": "Ternate",
+      "region": "Maluku Utara (Non-Halsel)",
+      "zone": "malut_non_halsel",
+      "depart": {
+        "G1": {
+          "leg1": 0,
+          "leg2": 545000,
+          "total": 545000
+        },
+        "G2": {
+          "leg1": 0,
+          "leg2": 545000,
+          "total": 545000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 0,
+          "total": 585000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 545000,
+          "total": 545000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 590000,
+          "leg2": 0,
+          "total": 590000
+        },
+        "G2": {
+          "leg1": 590000,
+          "leg2": 0,
+          "total": 590000
+        },
+        "G3": {
+          "leg1": 0,
+          "leg2": 635000,
+          "total": 635000
+        },
+        "G4": {
+          "leg1": 590000,
+          "leg2": 0,
+          "total": 590000
+        }
+      }
+    },
+    {
+      "name": "Ambon",
+      "region": "Maluku",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 137500,
+          "total": 357500
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 137500,
+          "total": 337500
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 137500,
+          "total": 722500
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 137500,
+          "total": 682500
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 137500,
+          "leg2": 275000,
+          "total": 412500
+        },
+        "G2": {
+          "leg1": 137500,
+          "leg2": 250000,
+          "total": 387500
+        },
+        "G3": {
+          "leg1": 137500,
+          "leg2": 635000,
+          "total": 772500
+        },
+        "G4": {
+          "leg1": 137500,
+          "leg2": 590000,
+          "total": 727500
+        }
+      }
+    },
+    {
+      "name": "Jakarta",
+      "region": "Jawa",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 200000,
+          "total": 420000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 200000,
+          "total": 400000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 200000,
+          "total": 785000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 200000,
+          "total": 745000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 200000,
+          "leg2": 275000,
+          "total": 475000
+        },
+        "G2": {
+          "leg1": 250000,
+          "leg2": 250000,
+          "total": 500000
+        },
+        "G3": {
+          "leg1": 200000,
+          "leg2": 635000,
+          "total": 835000
+        },
+        "G4": {
+          "leg1": 200000,
+          "leg2": 590000,
+          "total": 790000
+        }
+      }
+    },
+    {
+      "name": "Semarang",
+      "region": "Jawa",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 125000,
+          "total": 345000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 125000,
+          "total": 325000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 125000,
+          "total": 710000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 125000,
+          "total": 670000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 125000,
+          "leg2": 275000,
+          "total": 400000
+        },
+        "G2": {
+          "leg1": 125000,
+          "leg2": 250000,
+          "total": 375000
+        },
+        "G3": {
+          "leg1": 125000,
+          "leg2": 635000,
+          "total": 760000
+        },
+        "G4": {
+          "leg1": 125000,
+          "leg2": 590000,
+          "total": 715000
+        }
+      }
+    },
+    {
+      "name": "Solo",
+      "region": "Jawa",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 125000,
+          "total": 345000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 125000,
+          "total": 325000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 125000,
+          "total": 710000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 125000,
+          "total": 670000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 125000,
+          "leg2": 275000,
+          "total": 400000
+        },
+        "G2": {
+          "leg1": 125000,
+          "leg2": 250000,
+          "total": 375000
+        },
+        "G3": {
+          "leg1": 125000,
+          "leg2": 635000,
+          "total": 760000
+        },
+        "G4": {
+          "leg1": 125000,
+          "leg2": 590000,
+          "total": 715000
+        }
+      }
+    },
+    {
+      "name": "Yogyakarta",
+      "region": "Jawa",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 150000,
+          "total": 370000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 150000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 150000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 150000,
+          "total": 695000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 150000,
+          "leg2": 275000,
+          "total": 425000
+        },
+        "G2": {
+          "leg1": 150000,
+          "leg2": 250000,
+          "total": 400000
+        },
+        "G3": {
+          "leg1": 150000,
+          "leg2": 635000,
+          "total": 785000
+        },
+        "G4": {
+          "leg1": 150000,
+          "leg2": 590000,
+          "total": 740000
+        }
+      }
+    },
+    {
+      "name": "Surabaya",
+      "region": "Jawa",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 150000,
+          "total": 370000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 150000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 150000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 150000,
+          "total": 695000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 150000,
+          "leg2": 275000,
+          "total": 425000
+        },
+        "G2": {
+          "leg1": 150000,
+          "leg2": 250000,
+          "total": 400000
+        },
+        "G3": {
+          "leg1": 150000,
+          "leg2": 635000,
+          "total": 785000
+        },
+        "G4": {
+          "leg1": 150000,
+          "leg2": 590000,
+          "total": 740000
+        }
+      }
+    },
+    {
+      "name": "Manado",
+      "region": "Sulawesi",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 100000,
+          "total": 320000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 100000,
+          "total": 300000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 100000,
+          "total": 685000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 100000,
+          "total": 645000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 100000,
+          "leg2": 275000,
+          "total": 375000
+        },
+        "G2": {
+          "leg1": 100000,
+          "leg2": 250000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 100000,
+          "leg2": 635000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 100000,
+          "leg2": 590000,
+          "total": 690000
+        }
+      }
+    },
+    {
+      "name": "Makassar",
+      "region": "Sulawesi",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 125000,
+          "total": 345000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 125000,
+          "total": 325000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 125000,
+          "total": 710000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 125000,
+          "total": 670000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 125000,
+          "leg2": 275000,
+          "total": 400000
+        },
+        "G2": {
+          "leg1": 125000,
+          "leg2": 250000,
+          "total": 375000
+        },
+        "G3": {
+          "leg1": 125000,
+          "leg2": 635000,
+          "total": 760000
+        },
+        "G4": {
+          "leg1": 125000,
+          "leg2": 590000,
+          "total": 715000
+        }
+      }
+    },
+    {
+      "name": "Balikpapan",
+      "region": "Kalimantan",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 125000,
+          "total": 345000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 125000,
+          "total": 325000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 125000,
+          "total": 710000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 125000,
+          "total": 670000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 125000,
+          "leg2": 275000,
+          "total": 400000
+        },
+        "G2": {
+          "leg1": 125000,
+          "leg2": 250000,
+          "total": 375000
+        },
+        "G3": {
+          "leg1": 125000,
+          "leg2": 635000,
+          "total": 760000
+        },
+        "G4": {
+          "leg1": 125000,
+          "leg2": 590000,
+          "total": 715000
+        }
+      }
+    },
+    {
+      "name": "Samarinda",
+      "region": "Kalimantan",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 200000,
+          "total": 420000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 200000,
+          "total": 400000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 200000,
+          "total": 785000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 200000,
+          "total": 745000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 200000,
+          "leg2": 275000,
+          "total": 475000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 250000,
+          "total": 450000
+        },
+        "G3": {
+          "leg1": 200000,
+          "leg2": 635000,
+          "total": 835000
+        },
+        "G4": {
+          "leg1": 200000,
+          "leg2": 590000,
+          "total": 790000
+        }
+      }
+    },
+    {
+      "name": "Tarakan",
+      "region": "Kalimantan",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 100000,
+          "total": 320000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 100000,
+          "total": 300000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 100000,
+          "total": 685000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 100000,
+          "total": 645000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 100000,
+          "leg2": 275000,
+          "total": 375000
+        },
+        "G2": {
+          "leg1": 100000,
+          "leg2": 250000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 100000,
+          "leg2": 635000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 100000,
+          "leg2": 590000,
+          "total": 690000
+        }
+      }
+    },
+    {
+      "name": "Banjarmasin",
+      "region": "Kalimantan",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 125000,
+          "total": 345000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 125000,
+          "total": 325000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 125000,
+          "total": 710000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 125000,
+          "total": 670000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 125000,
+          "leg2": 275000,
+          "total": 400000
+        },
+        "G2": {
+          "leg1": 125000,
+          "leg2": 250000,
+          "total": 375000
+        },
+        "G3": {
+          "leg1": 125000,
+          "leg2": 635000,
+          "total": 760000
+        },
+        "G4": {
+          "leg1": 125000,
+          "leg2": 590000,
+          "total": 715000
+        }
+      }
+    },
+    {
+      "name": "Palangkaraya",
+      "region": "Kalimantan",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 100000,
+          "total": 320000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 100000,
+          "total": 300000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 100000,
+          "total": 685000
+        },
+        "G4": {
+          "leg1": 545000,
+          "leg2": 100000,
+          "total": 645000
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 100000,
+          "leg2": 275000,
+          "total": 375000
+        },
+        "G2": {
+          "leg1": 100000,
+          "leg2": 250000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 100000,
+          "leg2": 635000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 100000,
+          "leg2": 590000,
+          "total": 690000
+        }
+      }
+    },
+    {
+      "name": "Medan",
+      "region": "Sumatra",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 200000,
+          "total": 420000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 200000,
+          "total": 400000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 200000,
+          "total": 785000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 200000,
+          "leg2": 275000,
+          "total": 475000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 250000,
+          "total": 450000
+        },
+        "G3": {
+          "leg1": 200000,
+          "leg2": 635000,
+          "total": 835000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "name": "Batam",
+      "region": "Sumatra",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 150000,
+          "total": 370000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 150000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 150000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 150000,
+          "leg2": 275000,
+          "total": 425000
+        },
+        "G2": {
+          "leg1": 150000,
+          "leg2": 250000,
+          "total": 400000
+        },
+        "G3": {
+          "leg1": 150000,
+          "leg2": 635000,
+          "total": 785000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "name": "Pekanbaru",
+      "region": "Sumatra",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 100000,
+          "total": 320000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 100000,
+          "total": 300000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 100000,
+          "total": 685000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 100000,
+          "leg2": 275000,
+          "total": 375000
+        },
+        "G2": {
+          "leg1": 100000,
+          "leg2": 250000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 100000,
+          "leg2": 635000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "name": "Palembang",
+      "region": "Sumatra",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 150000,
+          "total": 370000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 150000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 150000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 150000,
+          "leg2": 275000,
+          "total": 425000
+        },
+        "G2": {
+          "leg1": 150000,
+          "leg2": 250000,
+          "total": 400000
+        },
+        "G3": {
+          "leg1": 150000,
+          "leg2": 635000,
+          "total": 785000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "name": "Jambi",
+      "region": "Sumatra",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 125000,
+          "total": 345000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 125000,
+          "total": 325000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 125000,
+          "total": 710000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 125000,
+          "leg2": 275000,
+          "total": 400000
+        },
+        "G2": {
+          "leg1": 125000,
+          "leg2": 250000,
+          "total": 375000
+        },
+        "G3": {
+          "leg1": 125000,
+          "leg2": 635000,
+          "total": 760000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "name": "Padang",
+      "region": "Sumatra",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 150000,
+          "total": 370000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 150000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 150000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 150000,
+          "leg2": 275000,
+          "total": 425000
+        },
+        "G2": {
+          "leg1": 150000,
+          "leg2": 250000,
+          "total": 400000
+        },
+        "G3": {
+          "leg1": 150000,
+          "leg2": 635000,
+          "total": 785000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "name": "Lampung",
+      "region": "Sumatra",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 175000,
+          "total": 395000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 175000,
+          "total": 375000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 175000,
+          "total": 760000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 175000,
+          "leg2": 275000,
+          "total": 450000
+        },
+        "G2": {
+          "leg1": 175000,
+          "leg2": 250000,
+          "total": 425000
+        },
+        "G3": {
+          "leg1": 175000,
+          "leg2": 635000,
+          "total": 810000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      }
+    },
+    {
+      "name": "Bangka/Belitung",
+      "region": "Sumatra",
+      "zone": "non_malut",
+      "depart": {
+        "G1": {
+          "leg1": 220000,
+          "leg2": 100000,
+          "total": 320000
+        },
+        "G2": {
+          "leg1": 200000,
+          "leg2": 100000,
+          "total": 300000
+        },
+        "G3": {
+          "leg1": 585000,
+          "leg2": 100000,
+          "total": 685000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      },
+      "return": {
+        "G1": {
+          "leg1": 100000,
+          "leg2": 275000,
+          "total": 375000
+        },
+        "G2": {
+          "leg1": 100000,
+          "leg2": 250000,
+          "total": 350000
+        },
+        "G3": {
+          "leg1": 100000,
+          "leg2": 635000,
+          "total": 735000
+        },
+        "G4": {
+          "leg1": 0,
+          "leg2": 0,
+          "total": 0
+        }
+      }
+    }
+  ],
+  "pohSopRules": {
+    "minServiceYearsForChange": 2,
+    "changeIntervalYears": 2,
+    "minPerformance": "Minimal nilai kinerja 'C' dan 'C' selama 2 semester terakhir & bebas SP aktif",
+    "effectiveRule": "Berlaku mulai tanggal 1 bulan berikutnya setelah disetujui (diterapkan pada cuti periodik berikutnya)",
+    "restrictedGrades": {
+      "S1": [
+        "Kawasi",
+        "Kawasi ( KTP Lingkar Obi )",
+        "Bacan",
+        "Labuha",
+        "Ternate",
+        "Makassar",
+        "Manado",
+        "Ambon"
+      ],
+      "P1": [
+        "Kawasi",
+        "Kawasi ( KTP Lingkar Obi )",
+        "Bacan",
+        "Labuha",
+        "Ternate",
+        "Makassar",
+        "Manado",
+        "Ambon",
+        "Balikpapan",
+        "Surabaya"
+      ],
+      "S2": [
+        "Kawasi",
+        "Kawasi ( KTP Lingkar Obi )",
+        "Bacan",
+        "Labuha",
+        "Ternate"
+      ]
+    }
+  },
+  "lumpsumTerms": [
+    "1. Perhatikan untuk pemberian uang lumpsum hanya diberikan untuk 1 (satu) kali perjalanan.",
+    "2. Untuk pemberian cash hanya diberikan pada saat mau cuti, sedangkan untuk kembali setelah dicuti akan diberikan setiba di lokasi site.",
+    "3. Maksimal pemberian uang cuti oleh Finance Site akan diberikan terakhir H+7 setelah SKC diverifikasi oleh Dept Head dan HR.",
+    "4. Highlight Hijau untuk BERANGKAT CUTI (Site → POH) dan Highlight Oranye untuk KEMBALI CUTI (POH → Site)."
+  ],
+  "overrideTypes": {
+    "sick": {
+      "code": "S",
+      "label": "Sakit (Surat Dokter)",
+      "countsAsSite": false
+    },
+    "permit": {
+      "code": "I",
+      "label": "Izin Resmi",
+      "countsAsSite": false
+    },
+    "duty": {
+      "code": "DL",
+      "label": "Dinas Luar / Training",
+      "countsAsSite": true
+    },
+    "alpha": {
+      "code": "A",
+      "label": "Mangkir / Alpha",
+      "countsAsSite": false
+    },
+    "customOff": {
+      "code": "OFF*",
+      "label": "OFF Manual / Tukar",
+      "countsAsSite": true
+    }
+  },
+  "defaults": {
+    "employeeName": "Ahmad Fauzi",
+    "employeeNik": "BJL-2024-0318",
+    "employeeDepartment": "Smelter Operations",
+    "employeeRole": "Production Supervisor",
+    "employeeGrade": "M3",
+    "rosterCode": "X63",
+    "workPattern": "13:1",
+    "siteCountMode": "calendar_site",
+    "trv1Placement": "depart",
+    "extraLeaveRounding": "round",
+    "pohCity": "Surabaya",
+    "joinDate": "2022-03-01",
+    "startDate": "2026-01-05",
+    "viewMode": "full_year",
+    "showHolidays": true
+  },
+  "colors": {
+    "work": {
+      "bg": "#FFFFFF",
+      "text": "#1E293B",
+      "border": "#CBD5E1",
+      "label": "Hari Kerja On-Site (X)"
+    },
+    "offSite": {
+      "bg": "#E0F2FE",
+      "text": "#0369A1",
+      "border": "#7DD3FC",
+      "label": "OFF Pola Kerja di Site (OFF)"
+    },
+    "extendWork": {
+      "bg": "#FEF3C7",
+      "text": "#92400E",
+      "border": "#FCD34D",
+      "label": "Kerja Extend / Tunda Cuti (Hitung CE)"
+    },
+    "trvDepart": {
+      "bg": "#D1FAE5",
+      "text": "#065F46",
+      "border": "#34D399",
+      "label": "Travel Berangkat (TRV — Site → POH)"
+    },
+    "periodicLeave": {
+      "bg": "#DCFCE7",
+      "text": "#166534",
+      "border": "#86EFAC",
+      "label": "Cuti Periodik (CP)"
+    },
+    "extraLeave": {
+      "bg": "#FEF9C3",
+      "text": "#854D0E",
+      "border": "#FACC15",
+      "label": "Cuti Ekstra (CE)"
+    },
+    "annualLeave": {
+      "bg": "#F3E8FF",
+      "text": "#6B21A8",
+      "border": "#C084FC",
+      "label": "Cuti Tahunan (CT)"
+    },
+    "trvReturn": {
+      "bg": "#FFEDD5",
+      "text": "#9A3412",
+      "border": "#FB923C",
+      "label": "Travel Kembali (TRV — POH → Site)"
+    },
+    "preStart": {
+      "bg": "#F8FAFC",
+      "text": "#94A3B8",
+      "border": "#E2E8F0",
+      "label": "Pra-Mulai Roster"
+    },
+    "nonDate": {
+      "bg": "#CBD5E1",
+      "text": "#64748B",
+      "border": "#CBD5E1",
+      "label": "Tanggal Non-Kalender"
+    },
+    "sick": {
+      "bg": "#FFE4E6",
+      "text": "#9F1239",
+      "border": "#FDA4AF",
+      "label": "Override: Sakit (S)"
+    },
+    "permit": {
+      "bg": "#E0E7FF",
+      "text": "#3730A3",
+      "border": "#A5B4FC",
+      "label": "Override: Izin (I)"
+    },
+    "duty": {
+      "bg": "#CFFAFE",
+      "text": "#155E75",
+      "border": "#67E8F9",
+      "label": "Override: Dinas Luar (DL)"
+    },
+    "alpha": {
+      "bg": "#FECACA",
+      "text": "#991B1B",
+      "border": "#F87171",
+      "label": "Override: Mangkir / Alpha (A)"
+    },
+    "customOff": {
+      "bg": "#E0F2FE",
+      "text": "#0C4A6E",
+      "border": "#38BDF8",
+      "label": "Override: OFF Manual (OFF*)"
+    }
+  },
+  "signatures": [
+    {
+      "title": "Diajukan Oleh,",
+      "role": "Pekerja",
+      "name": ""
+    },
+    {
+      "title": "Disetujui Oleh,",
+      "role": "Department Head",
+      "name": ""
+    },
+    {
+      "title": "Diverifikasi Oleh,",
+      "role": "HR & GA Site / Kantor Perwakilan",
+      "name": ""
+    },
+    {
+      "title": "Disetujui Oleh,",
+      "role": "Head of HR & GA",
+      "name": ""
+    }
+  ],
+  "signaturePresets": [
+    {
+      "title": "Diajukan Oleh,",
+      "role": "Pekerja",
+      "name": ""
+    },
+    {
+      "title": "Diketahui Oleh,",
+      "role": "Atasan Langsung",
+      "name": ""
+    },
+    {
+      "title": "Disetujui Oleh,",
+      "role": "Department Head",
+      "name": ""
+    },
+    {
+      "title": "Diverifikasi Oleh,",
+      "role": "HR & GA Site / Kantor Perwakilan",
+      "name": ""
+    },
+    {
+      "title": "Disetujui Oleh,",
+      "role": "Head of HR & GA",
+      "name": ""
+    },
+    {
+      "title": "Disetujui Oleh,",
+      "role": "Executive Deputy Site GM",
+      "name": ""
+    },
+    {
+      "title": "Disetujui Oleh,",
+      "role": "Site General Manager",
+      "name": ""
+    },
+    {
+      "title": "Disetujui Oleh,",
+      "role": "JV Deputy General Manager",
+      "name": ""
+    }
+  ]
+};
+
+// Bagikan kalender libur nasional & label tanggal Indonesia dari KAN_CONFIG ke BJL_CONFIG
+window.BJL_CONFIG.holidays = window.KAN_CONFIG.holidays;
+window.BJL_CONFIG.labels = window.KAN_CONFIG.labels;
+
+window.APP_CONFIG = {
+  version: '3.0.0',
+  appName: 'Timesheet & Leave Simulator Suite',
+  auth: {
+    enabled: true,
+    sessionKey: 'ts_sim_auth_session_v3',
+    users: [
+      {
+        username: 'irwans',
+        password: '123456',
+        displayName: 'Irwan S.',
+        role: 'Super Admin',
+        companies: ['BJL', 'KAN'],
+        defaultCompany: 'BJL'
+      },
+      {
+        username: 'userkan',
+        password: '123456',
+        displayName: 'User KAN',
+        role: 'HR / User KAN',
+        companies: ['KAN'],
+        defaultCompany: 'KAN'
+      },
+      {
+        username: 'userbjl',
+        password: '123456',
+        displayName: 'User BJL',
+        role: 'HR / User BJL',
+        companies: ['BJL'],
+        defaultCompany: 'BJL'
+      }
+    ]
+  },
+  companies: {
+    KAN: {
+      code: 'KAN',
+      shortName: 'PT KAN',
+      fullName: 'PT Kalimantan Agro Nusantara (KAN)',
+      badgeColor: '#0F766E'
+    },
+    BJL: {
+      code: 'BJL',
+      shortName: 'PT BJL',
+      fullName: 'PT Baja Jaya Lestari (BJL)',
+      badgeColor: '#1E3A5F'
+    }
+  }
 };

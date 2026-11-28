@@ -1,28 +1,34 @@
-# KAN Timesheet & Leave Simulator (v2.0 — Fase 1 Modular)
+# Timesheet & Leave Simulator Suite (v3.0 — Multi-Company PT KAN & PT BJL)
 
-Aplikasi simulasi jadwal roster 5:2, **P.O.H (Point of Hire)**, **Kunci Periode (History Lock)**, **Carry-Over TC**, **Override Manual (`S`/`I`/`DL`/`A`/`OFF*`)**, **Hari Libur Nasional Indonesia (2025–2027)**, **Share Link & Scenario Manager**, serta Export Excel `.xlsx` & Print PDF A4 Landscape.
+Aplikasi web modular berbasis browser (tanpa backend) untuk simulasi jadwal roster, cuti, hari travel, P.O.H, uang Lumpsum, kunci periode (history lock), override manual, ekspor Excel (`.xlsx`), dan cetak PDF A4 Landscape untuk dua entitas perusahaan:
 
-## Yang Baru di v2.0
+1. **PT Baja Jaya Lestari (BJL)** — Roster Site `X56` / `X63` / `X70`, pola kerja `13:1` / `6:1` / `2:1`, Cuti Periodik (CP), Extend On-Site → Cuti Ekstra (CE), Hari Travel (`TRV 0/1/2`), Bracket CT Masa Kerja (`12–15 hr`), Master Tarif Lumpsum 26 Kota (Berangkat Hijau / Kembali Oranye) + Input Mandiri Grade `P6`, `M8`, `Y`, `Z`, validasi SOP POH `BJL-H-SOP-HRGA-005T`, serta Export Excel 4 Sheet.
+2. **PT Kalimantan Agro Nusantara (KAN)** — Fitur lengkap v2.0 dipertahankan 100% utuh: Roster `5:2`, Tabungan & Carry-Over `TC`, Profil P.O.H Ring 1/2/3, Kunci Periode, Durasi Fleksibel per Periode, Override Manual (`S`/`I`/`DL`/`A`/`OFF*`), Libur Nasional 2025–2027, dan Export Excel `.xlsx`.
 
-1. **Profil P.O.H & Kategori Jabatan:** Pilih `Ring 1 (Lokal Site)`, `Ring 2 (Provinsi Darat/Laut)`, atau `Ring 3 (Non-Lokal Pesawat)` + Kota/Bandara P.O.H. Hak & kuota tiket otomatis mengikuti aturan di `config.js` (`pohRules`).
-2. **Kunci Periode (`🔒 Kunci Periode`):** Kunci Periode 1 (misal 9 hari) sebagai realisasi/history. Saat karyawan kembali kerja dan mengubah target cuti global (misal jadi 11 hari) untuk Periode 2 ke depan, Periode 1 yang terkunci tetap utuh tidak bergeser.
-3. **Durasi Fleksibel per Periode & Carry-Over TC:** Atur saldo awal TC, ubah durasi tiap periode secara independen, dan tabung sisa TC ke periode berikutnya.
-4. **Kalender Hari Libur Nasional Indonesia (2025–2027):** Penanda sudut merah (Libur Nasional) & amber (Cuti Bersama) di matriks, notifikasi irisan hari raya di tabel periode, dan rekap jumlah tanggal merah kerja di KPI.
-5. **Custom Override Sel Manual (`S`, `I`, `DL`, `A`, `OFF*`):** Klik tanggal mana saja untuk menandai Sakit/Izin/Dinas Luar/Alpha beserta catatan. Status non-kerja otomatis menggugurkan syarat 5 hari kerja minggu berjalan sehingga penerbitan TC & jadwal pulang bergeser secara realistis.
-6. **Bagikan Link (`#s=...`) & Kelola Skenario (`.json`):** Salin link simulasi langsung ke WhatsApp/HR atau simpan & ekspor banyak skenario ke file JSON.
-7. **Layout Print PDF 4 Tanda Tangan Sejajar & Default Langsung X1:** Blok tanda tangan otomatis sejajar 1 baris berapapun jumlah kolomnya, dan Jeda Pasca-Cuti default langsung masuk `X1`.
+## Akun Login Default (`config.js`)
+
+| Username | Password | Role | Akses Modul |
+|---|---|---|---|
+| `irwans` | `123456` | Super Admin | PT BJL & PT KAN (Switcher aktif) |
+| `userbjl` | `123456` | HR / User BJL | Khusus PT BJL |
+| `userkan` | `123456` | HR / User KAN | Khusus PT KAN |
+
+> Akun, password, aturan SOP, master Lumpsum, hari libur nasional, dan default tanda tangan dapat diubah langsung di `config.js`.
 
 ## Struktur File
 
 | File | Fungsi |
 |---|---|
-| `index.html` | Struktur halaman utama (tanpa logika bisnis hardcode) |
-| `config.js` | **Pusat seluruh variabel lapangan** (kode, SOP, `pohRules`, override, libur nasional, warna, tanda tangan) |
-| `styles.css` | Tampilan modern pastel & layout cetak PDF A4 Landscape |
-| `app.js` | Mesin simulasi roster v2.0, kunci periode, carry-over TC, override, skenario & Export Excel `.xlsx` |
-| `firebase.json` | Konfigurasi siap pakai untuk deploy ke Firebase Hosting (`no-cache` khusus `config.js`) |
+| `index.html` | Halaman utama Multi-Company (Login, Topbar Switcher, Workspace BJL, Workspace KAN, dan semua Modal) |
+| `config.js` | Pusat konfigurasi `KAN_CONFIG`, `BJL_CONFIG` (termasuk 26 kota Lumpsum), dan `APP_CONFIG` (login & entitas) |
+| `bjl-module.js` | Engine simulasi roster, CE, TRV, CT bracket, Lumpsum, skenario, dan Export Excel 4 Sheet PT BJL |
+| `kan-module.js` | Engine simulasi roster 5:2, TC carry-over, POH Ring 1–3, skenario, dan Export Excel PT KAN |
+| `app.js` | Shell controller global: autentikasi, switcher entitas, editor Tarif Lumpsum, dan editor Tanda Tangan PDF |
+| `styles.css` | Stylesheet responsif tema PT KAN & PT BJL + layout cetak PDF A4 Landscape |
+| `firebase.json` | Konfigurasi Firebase Hosting (`no-cache` untuk `config.js`) |
 
-## Deploy ke GitHub Pages / Firebase Hosting
+## Cara Menjalankan & Deploy
 
-- **GitHub Pages:** Upload semua file hasil ekstrak ZIP langsung ke root repository (`main` branch), lalu aktifkan di **Settings → Pages**.
+- **Lokal:** Ekstrak ZIP lalu buka `index.html` langsung di browser modern (Chrome / Edge / Safari / Firefox).
+- **GitHub Pages:** Upload semua file hasil ekstrak ke root repository (`main`), lalu aktifkan di **Settings → Pages**.
 - **Firebase Hosting:** Jalankan `firebase use --add` lalu `firebase deploy --only hosting`.
